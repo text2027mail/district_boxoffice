@@ -1,8 +1,12 @@
-// advance.js – Daily Advance (tomorrow)
+// advance.js – Daily Advance (tomorrow) – Supercompressed format
 // Output directory: ADVANCE_DIR (default ./advance)
+// Environment:
+//   ADVANCE_DIR  – output directory (default ./advance)
+//   PRETTY       – set to 'true' for pretty-printed JSON (default false)
 
 require('dotenv').config();
 const fs = require('fs');
+const fsPromises = fs.promises;
 const path = require('path');
 const fetch = require('node-fetch');
 const dayjs = require('dayjs');
@@ -20,55 +24,15 @@ const CONFIG = {
   RETRY_DELAY: 1000,
   FETCH_CONCURRENCY: 10,
   ADVANCE_DIR: process.env.ADVANCE_DIR || './advance',
+  PRETTY: process.env.PRETTY === 'true', // default false
 };
 
-function ensureDirs() {
-  if (!fs.existsSync(CONFIG.ADVANCE_DIR)) fs.mkdirSync(CONFIG.ADVANCE_DIR, { recursive: true });
-}
-ensureDirs();
-
-// ------------------------- HELPERS -------------------------
-function formatState(stateStr) {
-  if (!stateStr || typeof stateStr !== 'string') return 'Unknown';
-  return stateStr.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+// Ensure directory exists
+if (!fs.existsSync(CONFIG.ADVANCE_DIR)) {
+  fs.mkdirSync(CONFIG.ADVANCE_DIR, { recursive: true });
 }
 
-function formatChain(chainStr) {
-  if (!chainStr || typeof chainStr !== 'string') return 'Unknown';
-  return chainStr.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
-// ------------------------- FETCH WITH RETRIES -------------------------
-async function fetchWithRetry(url, headers, attempts = CONFIG.RETRY_ATTEMPTS) {
-  for (let i = 0; i < attempts; i++) {
-    try {
-      const resp = await fetch(url, { headers, timeout: 20000 });
-      if (resp.ok) return await resp.json();
-    } catch (err) {
-      if (i === attempts - 1) throw err;
-      await new Promise(r => setTimeout(r, CONFIG.RETRY_DELAY * (i + 1)));
-    }
-  }
-  return null;
-}
-
-async function fetchVenueData(venue) {
-  const url = CONFIG.API_URL.replace('{cid}', venue.id).replace('{date}', DATE);
-  try {
-    const data = await fetchWithRetry(url, {
-      'User-Agent': process.env.WORKER_UA,
-      'x-api-key': process.env.WORKER_KEY,
-    });
-    if (!data) return null;
-    const sessionDates = data?.data?.sessionDates || [];
-    if (!sessionDates.includes(DATE)) return null;
-    return { venue, data };
-  } catch {
-    return null;
-  }
-}
-
-// ------------------------- COMPRESS / DECOMPRESS (same as dailybo) -------------------------
+// ------------------------- COMPRESSION / DECOMPRESSION (identical to fetchold.js) -------------------------
 function buildDictionaries(shows) {
   const dicts = {
     cities: {}, states: {}, venues: {}, chains: {}, showtimes: {}, audis: {},
@@ -100,7 +64,7 @@ function compressShows(shows, dicts) {
     const sold = s.sold || 0;
     const gross = Math.round(s.gross * 100);
     const occupancy = total ? Math.round((sold / total) * 10000) : 0;
-    // No minsLeft for advance, but we keep 0 for uniformity
+    // minsLeft always 0 for advance bookings (no cutoff)
     return [cityId, stateId, venueId, chainId, timeId, audiId, total, avail, sold, gross, occupancy, 0];
   });
 }
@@ -126,16 +90,46 @@ function decompressShow(arr, dicts) {
     sold: arr[8],
     gross: arr[9] / 100,
     occupancy: (arr[10] / 100).toFixed(2) + '%',
-    minsLeft: arr[11], // always 0
+    minsLeft: arr[11],
   };
 }
 
-// ------------------------- MAIN -------------------------
+// ------------------------- FETCH HELPERS -------------------------
+async function fetchWithRetry(url, headers, attempts = CONFIG.RETRY_ATTEMPTS) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const resp = await fetch(url, { headers, timeout: 20000 });
+      if (resp.ok) return await resp.json();
+    } catch (err) {
+      if (i === attempts - 1) throw err;
+      await new Promise(r => setTimeout(r, CONFIG.RETRY_DELAY * (i + 1)));
+    }
+  }
+  return null;
+}
+
+async function fetchVenueData(venue) {
+  const url = CONFIG.API_URL.replace('{cid}', venue.id).replace('{date}', DATE);
+  try {
+    const data = await fetchWithRetry(url, {
+      'User-Agent': process.env.WORKER_UA,
+      'x-api-key': process.env.WORKER_KEY,
+    });
+    if (!data) return null;
+    const sessionDates = data?.data?.sessionDates || [];
+    if (!sessionDates.includes(DATE)) return null;
+    return { venue, data };
+  } catch {
+    return null;
+  }
+}
+
+// ------------------------- MAIN LOGIC -------------------------
 const nowIST = dayjs().tz('Asia/Kolkata');
 const DATE = nowIST.add(1, 'day').format('YYYY-MM-DD');
 const detailedPath = path.join(CONFIG.ADVANCE_DIR, `${DATE}_Detailed.json`);
 
-// Load existing advance data
+// Load existing advance data (if any)
 let existingShows = {};
 if (fs.existsSync(detailedPath)) {
   try {
@@ -149,8 +143,10 @@ if (fs.existsSync(detailedPath)) {
   } catch { existingShows = {}; }
 }
 
+// Load venues
 const VENUES = JSON.parse(fs.readFileSync(CONFIG.VENUES_FILE, 'utf8'));
 
+// Fetch all venues with concurrency
 async function fetchAll() {
   const results = [];
   const concurrency = CONFIG.FETCH_CONCURRENCY;
@@ -170,9 +166,10 @@ async function fetchAll() {
   for (const res of results) {
     if (!res) continue;
     const { venue, data } = res;
+    // Keep state and chain raw – no formatting, matches fetchold.js
     const city = venue.city;
-    const state = formatState(venue.state);
-    const chain = formatChain(venue.chainKey);
+    const state = venue.state || 'Unknown';
+    const chain = venue.chainKey || 'Unknown';
 
     const moviesMap = {};
     (data.meta?.movies || []).forEach(m => (moviesMap[m.id] = m));
@@ -210,6 +207,7 @@ async function fetchAll() {
         chain,
       };
 
+      // Update or append (same venue/time/audi)
       const existingIndex = existingShows[key].findIndex(e =>
         e.venue === venue.name &&
         e.time === newShow.time &&
@@ -239,7 +237,8 @@ async function fetchAll() {
     movies: compressedMovies,
   };
 
-  const newStr = JSON.stringify(outputDetailed, null, 2);
+  // Write with minified JSON by default (unless PRETTY=true)
+  const newStr = CONFIG.PRETTY ? JSON.stringify(outputDetailed, null, 2) : JSON.stringify(outputDetailed);
   let oldStr = '';
   if (fs.existsSync(detailedPath)) {
     oldStr = fs.readFileSync(detailedPath, 'utf8');
