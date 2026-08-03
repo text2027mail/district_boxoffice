@@ -1,6 +1,7 @@
-// dailybo.js – Enterprise-grade Daily Boxoffice (today)
-// Compressed detailed JSON with embedded dictionaries for city, state, venue, chain, time, audi.
-// No separate meta files.
+// dailybo.js – Enterprise-grade Daily Boxoffice
+// Output directories can be overridden by env vars:
+//   BOXOFFICE_DIR (default ./boxoffice)
+//   LOGS_DIR      (default ./logs)
 
 require('dotenv').config();
 const fs = require('fs');
@@ -21,14 +22,13 @@ const CONFIG = {
   RETRY_ATTEMPTS: 3,
   RETRY_DELAY: 1000,
   FETCH_CONCURRENCY: 10,
-  BASE_DIR: './districtdata2026',
-  BOXOFFICE_DIR: './districtdata2026/boxoffice',
-  LOGS_DIR: './districtdata2026/logs',
+  BOXOFFICE_DIR: process.env.BOXOFFICE_DIR || './boxoffice',
+  LOGS_DIR: process.env.LOGS_DIR || './logs',
 };
 
 // Ensure directories exist
 function ensureDirs() {
-  [CONFIG.BASE_DIR, CONFIG.BOXOFFICE_DIR, CONFIG.LOGS_DIR].forEach(dir => {
+  [CONFIG.BOXOFFICE_DIR, CONFIG.LOGS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   });
 }
@@ -78,15 +78,9 @@ async function fetchVenueData(venue) {
 }
 
 // ------------------------- COMPRESS / DECOMPRESS (with embedded dictionaries) -------------------------
-// Build dictionaries from shows, then convert shows to integer arrays.
 function buildDictionaries(shows) {
   const dicts = {
-    cities: {},
-    states: {},
-    venues: {},
-    chains: {},
-    showtimes: {},
-    audis: {},
+    cities: {}, states: {}, venues: {}, chains: {}, showtimes: {}, audis: {},
   };
   const nextId = { cities: 0, states: 0, venues: 0, chains: 0, showtimes: 0, audis: 0 };
 
@@ -99,12 +93,7 @@ function buildDictionaries(shows) {
     const audi = s.audi || ''; if (!dicts.audis[audi]) dicts.audis[audi] = nextId.audis++;
   });
 
-  // Build reverse maps for decoding
-  const reverse = {};
-  for (const key of Object.keys(dicts)) {
-    reverse[key] = Object.fromEntries(Object.entries(dicts[key]).map(([v, k]) => [k, v]));
-  }
-  return { forward: dicts, reverse };
+  return { forward: dicts };
 }
 
 function compressShows(shows, dicts) {
@@ -126,7 +115,14 @@ function compressShows(shows, dicts) {
 }
 
 function decompressShow(arr, dicts) {
-  const reverse = dicts.reverse;
+  const reverse = {
+    cities: Object.fromEntries(Object.entries(dicts.cities).map(([k, v]) => [v, k])),
+    states: Object.fromEntries(Object.entries(dicts.states).map(([k, v]) => [v, k])),
+    venues: Object.fromEntries(Object.entries(dicts.venues).map(([k, v]) => [v, k])),
+    chains: Object.fromEntries(Object.entries(dicts.chains).map(([k, v]) => [v, k])),
+    showtimes: Object.fromEntries(Object.entries(dicts.showtimes).map(([k, v]) => [v, k])),
+    audis: Object.fromEntries(Object.entries(dicts.audis).map(([k, v]) => [v, k])),
+  };
   return {
     city: reverse.cities[arr[0]],
     state: reverse.states[arr[1]],
@@ -156,8 +152,6 @@ let existingShows = {};
 if (fs.existsSync(detailedPath)) {
   try {
     const oldData = JSON.parse(fs.readFileSync(detailedPath, 'utf8'));
-    // oldData has structure: { date, lastUpdated, dicts, movies: { movieKey: [compressed shows] } }
-    // We need to decompress to merge with new data.
     if (oldData.movies) {
       for (const [movie, compressedShows] of Object.entries(oldData.movies)) {
         if (movie === 'date' || movie === 'lastUpdated' || movie === 'dicts') continue;
@@ -299,7 +293,7 @@ async function fetchAll() {
   const outputDetailed = {
     date: DATE,
     lastUpdated: nowIST.format('hh:mm A, DD MMMM YYYY'),
-    dicts: dicts.forward,   // forward dictionaries (string -> id)
+    dicts: dicts.forward,
     movies: compressedMovies,
   };
 
