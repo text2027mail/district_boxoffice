@@ -22,7 +22,6 @@ jobs:
     env:
       PRIVATE_REPO: text2027mail/DistrictData2026
       PRIVATE_BRANCH: main
-
       PAT: ${{ secrets.PRIVATE_REPO_PAT }}
 
     steps:
@@ -43,14 +42,11 @@ jobs:
       - name: Verify PAT
         shell: bash
         run: |
-
           echo "Repository : ${PRIVATE_REPO}"
-
           if [ -z "$PAT" ]; then
             echo "❌ PAT secret is EMPTY"
             exit 1
           fi
-
           echo "PAT length: ${#PAT}"
 
       ####################################################
@@ -60,18 +56,14 @@ jobs:
       - name: Test GitHub Authentication
         shell: bash
         run: |
-
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-          -H "Authorization: token ${PAT}" \
-          https://api.github.com/repos/${PRIVATE_REPO})
-
+            -H "Authorization: token ${PAT}" \
+            https://api.github.com/repos/${PRIVATE_REPO})
           echo "HTTP Status: $STATUS"
-
           if [ "$STATUS" != "200" ]; then
             echo "❌ GitHub authentication failed."
             exit 1
           fi
-
           echo "✅ Authentication OK"
 
       ####################################################
@@ -81,10 +73,9 @@ jobs:
       - name: Clone Private Repository
         shell: bash
         run: |
-
           git clone \
-          https://x-access-token:${PAT}@github.com/${PRIVATE_REPO}.git \
-          data
+            https://x-access-token:${PAT}@github.com/${PRIVATE_REPO}.git \
+            data
 
       ####################################################
       # Setup Node
@@ -113,12 +104,9 @@ jobs:
           BOXOFFICE_DIR: ${{ github.workspace }}/data/boxoffice
           ADVANCE_DIR: ${{ github.workspace }}/data/advance
           LOGS_DIR: ${{ github.workspace }}/data/logs
-
           START_DATE: ${{ github.event.inputs.start_date }}
           END_DATE: ${{ github.event.inputs.end_date }}
-        run: |
-
-          node fetchold.js
+        run: node fetchold.js
 
       ####################################################
       # Commit
@@ -128,22 +116,17 @@ jobs:
         shell: bash
         working-directory: data
         run: |
-
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-
           git add .
-
-          if git diff --cached --quiet
-          then
+          if git diff --cached --quiet; then
             echo "No changes."
             exit 0
           fi
-
           git commit -m "Historical migration"
 
       ####################################################
-      # Push
+      # Push with verbose output
       ####################################################
 
       - name: Push
@@ -151,7 +134,8 @@ jobs:
         env:
           PAT: ${{ secrets.PRIVATE_REPO_PAT }}
         run: |
-
           git push \
-          https://x-access-token:${PAT}@github.com/${PRIVATE_REPO}.git \
-          HEAD:${PRIVATE_BRANCH}
+            --verbose \
+            --progress \
+            https://x-access-token:${PAT}@github.com/${PRIVATE_REPO}.git \
+            HEAD:${PRIVATE_BRANCH}
