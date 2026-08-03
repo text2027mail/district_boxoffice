@@ -23,7 +23,7 @@ const CONFIG = {
   CUTOFF_MINS: 200,
   RETRY_ATTEMPTS: 3,
   RETRY_DELAY: 1000,
-  FETCH_CONCURRENCY: 30,                    // increased for speed
+  FETCH_CONCURRENCY: 30,
   BOXOFFICE_DIR: process.env.BOXOFFICE_DIR || './boxoffice',
   LOGS_DIR: process.env.LOGS_DIR || './logs',
   PRETTY: process.env.PRETTY === 'true',
@@ -37,7 +37,7 @@ function ensureDirs() {
 }
 ensureDirs();
 
-// ------------------------- COMPRESSION / DECOMPRESSION (unchanged) -------------------------
+// ------------------------- COMPRESSION / DECOMPRESSION -------------------------
 function buildDictionaries(shows) {
   const dicts = {
     cities: {}, states: {}, venues: {}, chains: {}, showtimes: {}, audis: {},
@@ -99,7 +99,7 @@ function decompressShow(arr, dicts) {
   };
 }
 
-// ------------------------- HELPERS (other) -------------------------
+// ------------------------- HELPERS -------------------------
 function roundToHourLabel(timeObj) {
   const mins = timeObj.minute();
   let hour = timeObj.hour();
@@ -144,7 +144,7 @@ async function fetchVenueData(venue, index, total) {
   }
 }
 
-// ------------------------- MAIN LOGIC -------------------------
+// ------------------------- MAIN -------------------------
 const nowIST = dayjs().tz('Asia/Kolkata');
 const DATE = nowIST.format('YYYY-MM-DD');
 const MONTH_YEAR = nowIST.format('MM-YYYY');
@@ -166,10 +166,8 @@ if (fs.existsSync(detailedPath)) {
   } catch { existingShows = {}; }
 }
 
-// Load venues
 const VENUES = JSON.parse(fs.readFileSync(CONFIG.VENUES_FILE, 'utf8'));
 
-// Fetch all venues with concurrency – with progress logs
 async function fetchAll() {
   const results = [];
   const concurrency = CONFIG.FETCH_CONCURRENCY;
@@ -199,7 +197,7 @@ async function fetchAll() {
     if (!res) continue;
     const { venue, data } = res;
     const city = venue.city;
-    const state = venue.state || 'Unknown';   // raw, no formatting – matches fetchold.js
+    const state = venue.state || 'Unknown';
     const chain = venue.chainKey || 'Unknown';
 
     const moviesMap = {};
@@ -243,7 +241,6 @@ async function fetchAll() {
         chain,
       };
 
-      // Check for existing entry (venue, time, audi)
       const existingIndex = existingShows[key].findIndex(e =>
         e.venue === venue.name &&
         e.time === newShow.time &&
@@ -257,7 +254,7 @@ async function fetchAll() {
     }
   }
 
-  // 3. Build dictionaries from all shows (union of all movies)
+  // 3. Build dictionaries from all shows
   const allShows = Object.values(existingShows).flat();
   const dicts = buildDictionaries(allShows);
 
@@ -267,48 +264,55 @@ async function fetchAll() {
     compressedMovies[movie] = compressShows(shows, dicts.forward);
   }
 
-  // 5. Update monthly logs (top 50 by gross)
+  // 5. Update monthly logs (top 50 by gross) – compressed array format
+  //    We need summary data for top 50, so we compute it on the fly
+  const summaryForLogs = {};
+  for (const [movieKey, shows] of Object.entries(existingShows)) {
+    if (!Array.isArray(shows)) continue;
+    let gross = 0, sold = 0, totalSeats = 0, showsCount = 0;
+    for (const s of shows) {
+      gross += s.gross;
+      sold += s.sold;
+      totalSeats += s.totalSeats;
+      showsCount++;
+    }
+    summaryForLogs[movieKey] = {
+      gross: gross,
+      sold: sold,
+      shows: showsCount,
+      totalSeats: totalSeats,
+    };
+  }
+
   let monthlyLogs = {};
   if (fs.existsSync(monthlyLogPath)) {
     try { monthlyLogs = JSON.parse(fs.readFileSync(monthlyLogPath, 'utf8')); } catch { monthlyLogs = {}; }
   }
 
-  // Compute summary from existingShows
-  const summary = {};
-  for (const [movie, shows] of Object.entries(existingShows)) {
-    let totalGross = 0, totalSold = 0, totalShows = 0, totalSeats = 0;
-    for (const s of shows) {
-      totalGross += s.gross;
-      totalSold += s.sold;
-      totalShows++;
-      totalSeats += s.totalSeats;
-    }
-    summary[movie] = { gross: totalGross, sold: totalSold, shows: totalShows, seats: totalSeats };
-  }
-  const top50 = Object.entries(summary)
+  const roundedLabel = roundToHourLabel(nowIST);
+  const stamp = `${roundedLabel}, ${nowIST.format('DD/MM/YYYY')}`;
+
+  const top50 = Object.entries(summaryForLogs)
     .sort((a, b) => b[1].gross - a[1].gross)
     .slice(0, 50);
 
-  const roundedLabel = roundToHourLabel(nowIST);
-  const stamp = `${roundedLabel}, ${nowIST.format('DD/MM/YYYY')}`;
   for (const [movie, data] of top50) {
     if (!monthlyLogs[movie]) monthlyLogs[movie] = {};
     monthlyLogs[movie][stamp] = [
-      Math.round(data.gross * 100), // gross in paisa
+      Math.round(data.gross * 100),   // gross in paisa
       data.sold,
       data.shows,
-      data.seats ? Math.round((data.sold / data.seats) * 10000) : 0, // occupancy bp
+      data.totalSeats ? Math.round((data.sold / data.totalSeats) * 10000) : 0
     ];
   }
 
-  // 6. Write compressed detailed file with embedded dictionaries
+  // 6. Write compressed detailed file
   const outputDetailed = {
     date: DATE,
     lastUpdated: nowIST.format('hh:mm A, DD MMMM YYYY'),
     dicts: dicts.forward,
     movies: compressedMovies,
   };
-
   const newDetailed = CONFIG.PRETTY ? JSON.stringify(outputDetailed, null, 2) : JSON.stringify(outputDetailed);
   const oldDetailed = fs.existsSync(detailedPath) ? fs.readFileSync(detailedPath, 'utf8') : '';
   if (newDetailed !== oldDetailed) {
@@ -318,7 +322,7 @@ async function fetchAll() {
     console.log(`⏭️ No changes to detailed: ${detailedPath}`);
   }
 
-  // Write monthly logs (also respect PRETTY)
+  // 7. Write monthly logs (compressed arrays)
   const newLog = CONFIG.PRETTY ? JSON.stringify(monthlyLogs, null, 2) : JSON.stringify(monthlyLogs);
   const oldLog = fs.existsSync(monthlyLogPath) ? fs.readFileSync(monthlyLogPath, 'utf8') : '';
   if (newLog !== oldLog) {
