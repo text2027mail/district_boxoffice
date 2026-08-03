@@ -7,6 +7,7 @@
 //   START_DATE    – start date YYYY-MM-DD (default 2025-08-01)
 //   END_DATE      – end date YYYY-MM-DD   (default today)
 //   CONCURRENCY   – number of parallel downloads per chunk (default 50)
+//   PRETTY        – set to 'true' for pretty-printed JSON (default false)
 
 require('dotenv').config();
 const fs = require('fs');
@@ -29,6 +30,7 @@ const BOXOFFICE_OUT = process.env.BOXOFFICE_DIR || './boxoffice';
 const ADVANCE_OUT = process.env.ADVANCE_DIR || './advance';
 const LOGS_OUT = process.env.LOGS_DIR || './logs';
 const CONCURRENCY = parseInt(process.env.CONCURRENCY || '50', 10);
+const PRETTY = process.env.PRETTY === 'true';
 
 // Ensure directories exist
 [BOXOFFICE_OUT, ADVANCE_OUT, LOGS_OUT].forEach(dir => {
@@ -125,7 +127,9 @@ async function downloadAndConvert(url, outFile) {
       movies: compressed,
     };
 
-    await fsPromises.writeFile(outFile, JSON.stringify(output, null, 2), 'utf8');
+    // ✅ Write compact JSON (no spaces) unless PRETTY=true
+    const jsonString = PRETTY ? JSON.stringify(output, null, 2) : JSON.stringify(output);
+    await fsPromises.writeFile(outFile, jsonString, 'utf8');
     console.log(`✅ Converted ${outFile} (${totalShows} shows)`);
     return true;
   } catch (err) {
@@ -139,7 +143,6 @@ async function runWithConcurrency(tasks, concurrency) {
   const results = [];
   for (let i = 0; i < tasks.length; i += concurrency) {
     const chunk = tasks.slice(i, i + concurrency);
-    // Filter out any non‑function tasks (shouldn't happen, but safe)
     const validChunk = chunk.filter(task => typeof task === 'function');
     if (validChunk.length === 0) continue;
     console.log(`⏳ Processing chunk ${Math.floor(i / concurrency) + 1}/${Math.ceil(tasks.length / concurrency)} (${validChunk.length} tasks)`);
@@ -156,6 +159,7 @@ async function runWithConcurrency(tasks, concurrency) {
   console.log(`📁 Advance output: ${ADVANCE_OUT}`);
   console.log(`📁 Logs output: ${LOGS_OUT}`);
   console.log(`⚡ Concurrency per chunk: ${CONCURRENCY}`);
+  console.log(`🔘 Pretty-print JSON: ${PRETTY}`);
 
   // ----- Generate list of tasks -----
   const tasks = [];
@@ -169,7 +173,6 @@ async function runWithConcurrency(tasks, concurrency) {
     const boxofficeOut = path.join(BOXOFFICE_OUT, `${dateStr}_Detailed.json`);
     const advanceOut = path.join(ADVANCE_OUT, `${dateStr}_Detailed.json`);
 
-    // Only add tasks if output file doesn't exist
     if (!fs.existsSync(boxofficeOut)) {
       tasks.push(async () => {
         console.log(`⬇️ Downloading boxoffice ${dateStr}...`);
@@ -211,7 +214,10 @@ async function runWithConcurrency(tasks, concurrency) {
           const resp = await fetch(logUrl);
           if (resp.ok) {
             const data = await resp.json();
-            await fsPromises.writeFile(logOut, JSON.stringify(data, null, 2), 'utf8');
+            // Logs are already compact? We'll keep them as-is, but can minify too.
+            // For consistency, we minify logs as well.
+            const logString = PRETTY ? JSON.stringify(data, null, 2) : JSON.stringify(data);
+            await fsPromises.writeFile(logOut, logString, 'utf8');
             console.log(`✅ Log ${month} downloaded.`);
             return { type: 'log', month, success: true };
           } else {
