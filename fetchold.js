@@ -1,4 +1,4 @@
-// fetchold_parallel.js – Parallel historical migration (concurrency 50)
+// fetchold_parallel.js – Parallel historical migration (concurrency 50) – CHUNKED VERSION
 // Downloads old JSONs from GitHub and converts to new compressed format.
 // Environment variables:
 //   BOXOFFICE_DIR – output for boxoffice (default ./boxoffice)
@@ -6,7 +6,7 @@
 //   LOGS_DIR      – output for logs      (default ./logs)
 //   START_DATE    – start date YYYY-MM-DD (default 2025-08-01)
 //   END_DATE      – end date YYYY-MM-DD   (default today)
-//   CONCURRENCY   – number of parallel downloads (default 50)
+//   CONCURRENCY   – number of parallel downloads per chunk (default 50)
 
 require('dotenv').config();
 const fs = require('fs');
@@ -134,46 +134,18 @@ async function downloadAndConvert(url, outFile) {
   }
 }
 
-// ------------------------- CONCURRENCY LIMITER -------------------------
+// ------------------------- CONCURRENCY LIMITER (chunked) -------------------------
 async function runWithConcurrency(tasks, concurrency) {
   const results = [];
-  const queue = [...tasks];
-  const inProgress = new Set();
-
-  function processNext() {
-    if (queue.length === 0 && inProgress.size === 0) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const take = () => {
-        if (queue.length === 0 && inProgress.size === 0) {
-          resolve();
-          return;
-        }
-        if (inProgress.size >= concurrency) {
-          // Wait for one to finish
-          return;
-        }
-        const task = queue.shift();
-        const promise = task().then(result => {
-          results.push(result);
-          inProgress.delete(promise);
-          take();
-        }).catch(err => {
-          inProgress.delete(promise);
-          // We don't reject the whole batch; we log and continue
-          console.error(`Task failed: ${err.message}`);
-          take();
-        });
-        inProgress.add(promise);
-        // If we still have capacity, keep taking
-        if (inProgress.size < concurrency && queue.length > 0) {
-          take();
-        }
-      };
-      take();
-    });
+  for (let i = 0; i < tasks.length; i += concurrency) {
+    const chunk = tasks.slice(i, i + concurrency);
+    // Filter out any non‑function tasks (shouldn't happen, but safe)
+    const validChunk = chunk.filter(task => typeof task === 'function');
+    if (validChunk.length === 0) continue;
+    console.log(`⏳ Processing chunk ${Math.floor(i / concurrency) + 1}/${Math.ceil(tasks.length / concurrency)} (${validChunk.length} tasks)`);
+    const chunkResults = await Promise.all(validChunk.map(task => task()));
+    results.push(...chunkResults);
   }
-
-  await processNext();
   return results;
 }
 
@@ -183,7 +155,7 @@ async function runWithConcurrency(tasks, concurrency) {
   console.log(`📁 Boxoffice output: ${BOXOFFICE_OUT}`);
   console.log(`📁 Advance output: ${ADVANCE_OUT}`);
   console.log(`📁 Logs output: ${LOGS_OUT}`);
-  console.log(`⚡ Concurrency: ${CONCURRENCY}`);
+  console.log(`⚡ Concurrency per chunk: ${CONCURRENCY}`);
 
   // ----- Generate list of tasks -----
   const tasks = [];
@@ -258,7 +230,7 @@ async function runWithConcurrency(tasks, concurrency) {
 
   console.log(`\n📦 Total tasks: ${tasks.length}`);
 
-  // ----- Run with concurrency -----
+  // ----- Run with concurrency (chunked) -----
   const results = await runWithConcurrency(tasks, CONCURRENCY);
 
   // ----- Summarize -----
