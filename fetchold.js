@@ -1,8 +1,16 @@
-// fetchold.js – Download old JSONs from GitHub and convert to new compressed format.
-// Output dirs: BOXOFFICE_DIR, ADVANCE_DIR, LOGS_DIR (env overrides)
+// fetchold_parallel.js – Parallel historical migration (concurrency 50)
+// Downloads old JSONs from GitHub and converts to new compressed format.
+// Environment variables:
+//   BOXOFFICE_DIR – output for boxoffice (default ./boxoffice)
+//   ADVANCE_DIR   – output for advance   (default ./advance)
+//   LOGS_DIR      – output for logs      (default ./logs)
+//   START_DATE    – start date YYYY-MM-DD (default 2025-08-01)
+//   END_DATE      – end date YYYY-MM-DD   (default today)
+//   CONCURRENCY   – number of parallel downloads (default 50)
 
 require('dotenv').config();
 const fs = require('fs');
+const fsPromises = fs.promises;
 const path = require('path');
 const fetch = require('node-fetch');
 const dayjs = require('dayjs');
@@ -20,15 +28,18 @@ const LOGS_URL = 'https://raw.githubusercontent.com/unknownman2024/district_trac
 const BOXOFFICE_OUT = process.env.BOXOFFICE_DIR || './boxoffice';
 const ADVANCE_OUT = process.env.ADVANCE_DIR || './advance';
 const LOGS_OUT = process.env.LOGS_DIR || './logs';
+const CONCURRENCY = parseInt(process.env.CONCURRENCY || '50', 10);
 
-function ensureDirs() {
-  [BOXOFFICE_OUT, ADVANCE_OUT, LOGS_OUT].forEach(d => {
-    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-  });
-}
-ensureDirs();
+// Ensure directories exist
+[BOXOFFICE_OUT, ADVANCE_OUT, LOGS_OUT].forEach(dir => {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+});
 
-// ------------------------- HELPERS (same as dailybo) -------------------------
+// Parse start/end dates from env
+const START_DATE = process.env.START_DATE ? dayjs(process.env.START_DATE) : dayjs('2025-08-01');
+const END_DATE = process.env.END_DATE ? dayjs(process.env.END_DATE) : dayjs().tz('Asia/Kolkata');
+
+// ------------------------- HELPERS (compression logic) -------------------------
 function buildDictionaries(shows) {
   const dicts = {
     cities: {}, states: {}, venues: {}, chains: {}, showtimes: {}, audis: {},
@@ -63,7 +74,7 @@ function compressShows(shows, dicts) {
   });
 }
 
-// ------------------------- DOWNLOAD AND CONVERT -------------------------
+// ------------------------- ASYNC DOWNLOAD AND CONVERT -------------------------
 async function downloadAndConvert(url, outFile) {
   try {
     const resp = await fetch(url);
@@ -114,7 +125,7 @@ async function downloadAndConvert(url, outFile) {
       movies: compressed,
     };
 
-    fs.writeFileSync(outFile, JSON.stringify(output, null, 2), 'utf8');
+    await fsPromises.writeFile(outFile, JSON.stringify(output, null, 2), 'utf8');
     console.log(`✅ Converted ${outFile} (${totalShows} shows)`);
     return true;
   } catch (err) {
@@ -123,69 +134,136 @@ async function downloadAndConvert(url, outFile) {
   }
 }
 
+// ------------------------- CONCURRENCY LIMITER -------------------------
+async function runWithConcurrency(tasks, concurrency) {
+  const results = [];
+  const queue = [...tasks];
+  const inProgress = new Set();
+
+  function processNext() {
+    if (queue.length === 0 && inProgress.size === 0) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const take = () => {
+        if (queue.length === 0 && inProgress.size === 0) {
+          resolve();
+          return;
+        }
+        if (inProgress.size >= concurrency) {
+          // Wait for one to finish
+          return;
+        }
+        const task = queue.shift();
+        const promise = task().then(result => {
+          results.push(result);
+          inProgress.delete(promise);
+          take();
+        }).catch(err => {
+          inProgress.delete(promise);
+          // We don't reject the whole batch; we log and continue
+          console.error(`Task failed: ${err.message}`);
+          take();
+        });
+        inProgress.add(promise);
+        // If we still have capacity, keep taking
+        if (inProgress.size < concurrency && queue.length > 0) {
+          take();
+        }
+      };
+      take();
+    });
+  }
+
+  await processNext();
+  return results;
+}
+
 // ------------------------- MAIN -------------------------
 (async function main() {
-  const startDate = dayjs('2025-08-01');
-  const endDate = dayjs().tz('Asia/Kolkata');
+  console.log(`🚀 Starting parallel migration from ${START_DATE.format('YYYY-MM-DD')} to ${END_DATE.format('YYYY-MM-DD')}`);
+  console.log(`📁 Boxoffice output: ${BOXOFFICE_OUT}`);
+  console.log(`📁 Advance output: ${ADVANCE_OUT}`);
+  console.log(`📁 Logs output: ${LOGS_OUT}`);
+  console.log(`⚡ Concurrency: ${CONCURRENCY}`);
 
-  let current = startDate;
-  let successCount = 0, failCount = 0;
+  // ----- Generate list of tasks -----
+  const tasks = [];
 
-  while (current.isBefore(endDate) || current.isSame(endDate, 'day')) {
+  // For each date, add boxoffice and advance tasks
+  let current = START_DATE.clone();
+  while (current.isBefore(END_DATE) || current.isSame(END_DATE, 'day')) {
     const dateStr = current.format('YYYY-MM-DD');
     const boxofficeUrl = `${BASE_URL_BOXOFFICE}${dateStr}_Detailed.json`;
     const advanceUrl = `${BASE_URL_ADVANCE}${dateStr}_Detailed.json`;
-
     const boxofficeOut = path.join(BOXOFFICE_OUT, `${dateStr}_Detailed.json`);
     const advanceOut = path.join(ADVANCE_OUT, `${dateStr}_Detailed.json`);
 
-    if (fs.existsSync(boxofficeOut)) {
-      console.log(`⏭️ Boxoffice ${dateStr} already exists, skipping.`);
+    // Only add tasks if output file doesn't exist
+    if (!fs.existsSync(boxofficeOut)) {
+      tasks.push(async () => {
+        console.log(`⬇️ Downloading boxoffice ${dateStr}...`);
+        const ok = await downloadAndConvert(boxofficeUrl, boxofficeOut);
+        return { type: 'boxoffice', date: dateStr, success: ok };
+      });
     } else {
-      console.log(`⬇️ Downloading boxoffice ${dateStr}...`);
-      const ok = await downloadAndConvert(boxofficeUrl, boxofficeOut);
-      if (ok) successCount++; else failCount++;
+      console.log(`⏭️ Boxoffice ${dateStr} already exists, skipping.`);
     }
 
-    if (fs.existsSync(advanceOut)) {
-      console.log(`⏭️ Advance ${dateStr} already exists, skipping.`);
+    if (!fs.existsSync(advanceOut)) {
+      tasks.push(async () => {
+        console.log(`⬇️ Downloading advance ${dateStr}...`);
+        const ok = await downloadAndConvert(advanceUrl, advanceOut);
+        return { type: 'advance', date: dateStr, success: ok };
+      });
     } else {
-      console.log(`⬇️ Downloading advance ${dateStr}...`);
-      const ok = await downloadAndConvert(advanceUrl, advanceOut);
-      if (ok) successCount++; else failCount++;
+      console.log(`⏭️ Advance ${dateStr} already exists, skipping.`);
     }
 
     current = current.add(1, 'day');
   }
 
-  // Monthly logs
-  console.log('\n📊 Downloading monthly logs...');
+  // ----- Monthly logs -----
+  console.log('\n📊 Generating monthly log tasks...');
   const months = [];
-  let m = dayjs('2025-08-01');
-  while (m.isBefore(endDate) || m.isSame(endDate, 'month')) {
+  let m = START_DATE.clone().startOf('month');
+  while (m.isBefore(END_DATE) || m.isSame(END_DATE, 'month')) {
     months.push(m.format('MM-YYYY'));
     m = m.add(1, 'month');
   }
   for (const month of months) {
     const logUrl = `${LOGS_URL}${month}.json`;
     const logOut = path.join(LOGS_OUT, `${month}.json`);
-    if (fs.existsSync(logOut)) {
+    if (!fs.existsSync(logOut)) {
+      tasks.push(async () => {
+        console.log(`⬇️ Downloading log ${month}...`);
+        try {
+          const resp = await fetch(logUrl);
+          if (resp.ok) {
+            const data = await resp.json();
+            await fsPromises.writeFile(logOut, JSON.stringify(data, null, 2), 'utf8');
+            console.log(`✅ Log ${month} downloaded.`);
+            return { type: 'log', month, success: true };
+          } else {
+            console.log(`⚠️ Log ${month} not found (status ${resp.status})`);
+            return { type: 'log', month, success: false };
+          }
+        } catch (err) {
+          console.log(`❌ Error downloading log ${month}: ${err.message}`);
+          return { type: 'log', month, success: false };
+        }
+      });
+    } else {
       console.log(`⏭️ Log ${month} already exists.`);
-      continue;
-    }
-    try {
-      const resp = await fetch(logUrl);
-      if (resp.ok) {
-        const data = await resp.json();
-        fs.writeFileSync(logOut, JSON.stringify(data, null, 2), 'utf8');
-        console.log(`✅ Log ${month} downloaded.`);
-      } else {
-        console.log(`⚠️ Log ${month} not found.`);
-      }
-    } catch (err) {
-      console.log(`❌ Error downloading log ${month}: ${err.message}`);
     }
   }
 
+  console.log(`\n📦 Total tasks: ${tasks.length}`);
+
+  // ----- Run with concurrency -----
+  const results = await runWithConcurrency(tasks, CONCURRENCY);
+
+  // ----- Summarize -----
+  const successCount = results.filter(r => r && r.success).length;
+  const failCount = results.length - successCount;
   console.log(`\n✅ Migration complete. Success: ${successCount}, Fail: ${failCount}`);
+  process.exit(failCount === 0 ? 0 : 1);
 })();
