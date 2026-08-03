@@ -37,7 +37,7 @@ function ensureDirs() {
 }
 ensureDirs();
 
-// ------------------------- COMPRESSION / DECOMPRESSION (unchanged) -------------------------
+// ------------------------- COMPRESSION / DECOMPRESSION -------------------------
 function buildDictionaries(shows) {
   const dicts = {
     cities: {}, states: {}, venues: {}, chains: {}, showtimes: {}, audis: {},
@@ -99,12 +99,29 @@ function decompressShow(arr, dicts) {
   };
 }
 
-// ------------------------- HELPERS (unchanged) -------------------------
+// ------------------------- HELPERS -------------------------
 function roundToHourLabel(timeObj) {
   const mins = timeObj.minute();
   let hour = timeObj.hour();
   if (mins > 45) hour += 1;
   return dayjs(timeObj).hour(hour).minute(0).format('hA');
+}
+
+// 🔥 NEW: Convert a key that may include format (e.g., "Movie [3D | English]")
+// to the simple "Movie | English" format used by the old code.
+function simplifyKey(rawKey) {
+  // If it contains brackets, extract movie name and language
+  const bracketMatch = rawKey.match(/^(.+?)\s*\[([^\]]+)\]\s*$/);
+  if (bracketMatch) {
+    const fullName = bracketMatch[1].trim();
+    const inside = bracketMatch[2].trim();
+    // Split by '|', take the last part as language
+    const parts = inside.split('|').map(s => s.trim());
+    const lang = parts[parts.length - 1];
+    return `${fullName} | ${lang}`;
+  }
+  // If no brackets, return as is (already "Movie | Language")
+  return rawKey;
 }
 
 async function fetchWithRetry(url, headers, attempts = CONFIG.RETRY_ATTEMPTS) {
@@ -144,7 +161,7 @@ async function fetchVenueData(venue, index, total) {
   }
 }
 
-// ------------------------- MAIN LOGIC -------------------------
+// ------------------------- MAIN -------------------------
 const nowIST = dayjs().tz('Asia/Kolkata');
 const DATE = nowIST.format('YYYY-MM-DD');
 const MONTH_YEAR = nowIST.format('MM-YYYY');
@@ -160,10 +177,18 @@ if (fs.existsSync(detailedPath)) {
     if (oldData.movies) {
       for (const [movie, compressedShows] of Object.entries(oldData.movies)) {
         if (movie === 'date' || movie === 'lastUpdated' || movie === 'dicts') continue;
-        existingShows[movie] = compressedShows.map(arr => decompressShow(arr, oldData.dicts));
+        // 🔥 Convert old key (which may include format) to simple "Movie | Language"
+        const simpleKey = simplifyKey(movie);
+        if (!existingShows[simpleKey]) existingShows[simpleKey] = [];
+        const decompressed = compressedShows.map(arr => decompressShow(arr, oldData.dicts));
+        // Merge (no duplicates because venue+time+audi uniquely identify a show)
+        existingShows[simpleKey].push(...decompressed);
       }
     }
-  } catch { existingShows = {}; }
+  } catch (err) {
+    console.warn('⚠️ Could not load old detailed file, starting fresh.', err.message);
+    existingShows = {};
+  }
 }
 
 const VENUES = JSON.parse(fs.readFileSync(CONFIG.VENUES_FILE, 'utf8'));
@@ -214,7 +239,7 @@ async function fetchAll() {
       const name = movie.name;
       const lang = session.lang || movie.lang || '';
 
-      // 🔥 FIX: Use the same simple key as old code – merge formats
+      // 🔥 Use the SAME simple key as the old code – no format included
       const key = `${name} | ${lang}`;
 
       if (!existingShows[key]) existingShows[key] = [];
@@ -239,8 +264,6 @@ async function fetchAll() {
         city,
         state,
         chain,
-        // Optional: we could store format separately, but it's not needed for the main key.
-        // If we want to keep it, we can add: format: session.scrnFmt || ''
       };
 
       const existingIndex = existingShows[key].findIndex(e =>
@@ -256,7 +279,7 @@ async function fetchAll() {
     }
   }
 
-  // 3. Build dictionaries from all shows (union of all movies)
+  // 3. Build dictionaries from all shows
   const allShows = Object.values(existingShows).flat();
   const dicts = buildDictionaries(allShows);
 
