@@ -1,12 +1,11 @@
-// dailybo.js – Enterprise-grade Daily Boxoffice (Supercompressed format)
-// Output directories can be overridden by env vars:
+// dailybo.js – Fast Daily Boxoffice (no compression, full JSON)
+// Directories can be overridden by env vars:
 //   BOXOFFICE_DIR (default ./boxoffice)
 //   LOGS_DIR      (default ./logs)
 //   PRETTY        – set to 'true' for pretty-printed JSON (default false)
 
 require('dotenv').config();
 const fs = require('fs');
-const fsPromises = fs.promises;
 const path = require('path');
 const fetch = require('node-fetch');
 const dayjs = require('dayjs');
@@ -23,83 +22,23 @@ const CONFIG = {
   CUTOFF_MINS: 200,
   RETRY_ATTEMPTS: 3,
   RETRY_DELAY: 1000,
-  FETCH_CONCURRENCY: 10,
+  FETCH_CONCURRENCY: 20,                // increased for speed
   BOXOFFICE_DIR: process.env.BOXOFFICE_DIR || './boxoffice',
   LOGS_DIR: process.env.LOGS_DIR || './logs',
   PRETTY: process.env.PRETTY === 'true',
 };
 
 // Ensure directories exist
-function ensureDirs() {
-  [CONFIG.BOXOFFICE_DIR, CONFIG.LOGS_DIR].forEach(dir => {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  });
-}
-ensureDirs();
+[CONFIG.BOXOFFICE_DIR, CONFIG.LOGS_DIR].forEach(dir => {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+});
 
-// ------------------------- COMPRESSION / DECOMPRESSION (from fetchold.js) -------------------------
-function buildDictionaries(shows) {
-  const dicts = {
-    cities: {}, states: {}, venues: {}, chains: {}, showtimes: {}, audis: {},
-  };
-  const nextId = { cities: 0, states: 0, venues: 0, chains: 0, showtimes: 0, audis: 0 };
-
-  shows.forEach(s => {
-    const city = s.city; if (!dicts.cities[city]) dicts.cities[city] = nextId.cities++;
-    const state = s.state; if (!dicts.states[state]) dicts.states[state] = nextId.states++;
-    const venue = s.venue; if (!dicts.venues[venue]) dicts.venues[venue] = nextId.venues++;
-    const chain = s.chain; if (!dicts.chains[chain]) dicts.chains[chain] = nextId.chains++;
-    const time = s.time; if (!dicts.showtimes[time]) dicts.showtimes[time] = nextId.showtimes++;
-    const audi = s.audi || ''; if (!dicts.audis[audi]) dicts.audis[audi] = nextId.audis++;
-  });
-
-  return { forward: dicts };
+// ------------------------- HELPERS -------------------------
+function formatState(stateStr) {
+  if (!stateStr || typeof stateStr !== 'string') return 'Unknown';
+  return stateStr.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-function compressShows(shows, dicts) {
-  return shows.map(s => {
-    const cityId = dicts.cities[s.city];
-    const stateId = dicts.states[s.state];
-    const venueId = dicts.venues[s.venue];
-    const chainId = dicts.chains[s.chain];
-    const timeId = dicts.showtimes[s.time];
-    const audiId = dicts.audis[s.audi || ''];
-    const total = s.totalSeats || 0;
-    const avail = s.available || 0;
-    const sold = s.sold || 0;
-    const gross = Math.round(s.gross * 100);
-    const occupancy = total ? Math.round((sold / total) * 10000) : 0;
-    const minsLeft = s.minsLeft || 0;
-    return [cityId, stateId, venueId, chainId, timeId, audiId, total, avail, sold, gross, occupancy, minsLeft];
-  });
-}
-
-function decompressShow(arr, dicts) {
-  const reverse = {
-    cities: Object.fromEntries(Object.entries(dicts.cities).map(([k, v]) => [v, k])),
-    states: Object.fromEntries(Object.entries(dicts.states).map(([k, v]) => [v, k])),
-    venues: Object.fromEntries(Object.entries(dicts.venues).map(([k, v]) => [v, k])),
-    chains: Object.fromEntries(Object.entries(dicts.chains).map(([k, v]) => [v, k])),
-    showtimes: Object.fromEntries(Object.entries(dicts.showtimes).map(([k, v]) => [v, k])),
-    audis: Object.fromEntries(Object.entries(dicts.audis).map(([k, v]) => [v, k])),
-  };
-  return {
-    city: reverse.cities[arr[0]],
-    state: reverse.states[arr[1]],
-    venue: reverse.venues[arr[2]],
-    chain: reverse.chains[arr[3]],
-    time: reverse.showtimes[arr[4]],
-    audi: reverse.audis[arr[5]],
-    totalSeats: arr[6],
-    available: arr[7],
-    sold: arr[8],
-    gross: arr[9] / 100,
-    occupancy: (arr[10] / 100).toFixed(2) + '%',
-    minsLeft: arr[11],
-  };
-}
-
-// ------------------------- HELPERS (other) -------------------------
 function roundToHourLabel(timeObj) {
   const mins = timeObj.minute();
   let hour = timeObj.hour();
@@ -127,11 +66,19 @@ async function fetchVenueData(venue) {
       'User-Agent': process.env.WORKER_UA,
       'x-api-key': process.env.WORKER_KEY,
     });
-    if (!data) return null;
+    if (!data) {
+      console.log(`⚠️ ${venue.id} – no data (failed after retries)`);
+      return null;
+    }
     const sessionDates = data?.data?.sessionDates || [];
-    if (!sessionDates.includes(DATE)) return null;
+    if (!sessionDates.includes(DATE)) {
+      console.log(`⏭️ ${venue.id} – no shows for ${DATE}`);
+      return null;
+    }
+    console.log(`✅ ${venue.id} – fetched (${sessionDates.length} dates)`);
     return { venue, data };
-  } catch {
+  } catch (err) {
+    console.log(`❌ ${venue.id} – error: ${err.message}`);
     return null;
   }
 }
@@ -142,20 +89,20 @@ const DATE = nowIST.format('YYYY-MM-DD');
 const MONTH_YEAR = nowIST.format('MM-YYYY');
 
 const detailedPath = path.join(CONFIG.BOXOFFICE_DIR, `${DATE}_Detailed.json`);
+const summaryPath  = path.join(CONFIG.BOXOFFICE_DIR, `${DATE}.json`);
 const monthlyLogPath = path.join(CONFIG.LOGS_DIR, `${MONTH_YEAR}.json`);
 
-// Load existing detailed (if any)
-let existingShows = {};
+// Load existing detailed (full data, no compression)
+let detailedOutput = {};
 if (fs.existsSync(detailedPath)) {
   try {
-    const oldData = JSON.parse(fs.readFileSync(detailedPath, 'utf8'));
-    if (oldData.movies) {
-      for (const [movie, compressedShows] of Object.entries(oldData.movies)) {
-        if (movie === 'date' || movie === 'lastUpdated' || movie === 'dicts') continue;
-        existingShows[movie] = compressedShows.map(arr => decompressShow(arr, oldData.dicts));
-      }
-    }
-  } catch { existingShows = {}; }
+    detailedOutput = JSON.parse(fs.readFileSync(detailedPath, 'utf8'));
+    // remove meta fields to avoid mixing
+    delete detailedOutput.date;
+    delete detailedOutput.lastUpdated;
+  } catch {
+    detailedOutput = {};
+  }
 }
 
 // Load venues
@@ -165,6 +112,7 @@ const VENUES = JSON.parse(fs.readFileSync(CONFIG.VENUES_FILE, 'utf8'));
 async function fetchAll() {
   const results = [];
   const concurrency = CONFIG.FETCH_CONCURRENCY;
+  console.log(`📡 Fetching ${VENUES.length} venues (concurrency ${concurrency})...`);
   for (let i = 0; i < VENUES.length; i += concurrency) {
     const chunk = VENUES.slice(i, i + concurrency);
     const chunkResults = await Promise.all(chunk.map(v => fetchVenueData(v)));
@@ -179,13 +127,12 @@ async function fetchAll() {
   // 1. Fetch live data
   const results = await fetchAll();
 
-  // 2. Update existingShows with new shows (only if within cutoff)
+  // 2. Update detailedOutput with new shows (only if within cutoff)
   for (const res of results) {
     if (!res) continue;
     const { venue, data } = res;
     const city = venue.city;
-    const state = venue.state || 'Unknown';   // raw, no formatting – matches fetchold.js
-    const chain = venue.chainKey || 'Unknown';
+    const state = formatState(venue.state);
 
     const moviesMap = {};
     (data.meta?.movies || []).forEach(m => (moviesMap[m.id] = m));
@@ -200,11 +147,9 @@ async function fetchAll() {
 
       const name = movie.name;
       const lang = session.lang || movie.lang || '';
-      const format = session.scrnFmt || '';
-      const formattedFormat = format ? format.replace(/-/g, ' | ') : '';
-      const key = formattedFormat ? `${name} [${formattedFormat} | ${lang}]` : `${name} | ${lang}`;
+      const key = `${name} | ${lang}`;
 
-      if (!existingShows[key]) existingShows[key] = [];
+      if (!detailedOutput[key]) detailedOutput[key] = [];
 
       const total = session.total || 0;
       const avail = session.avail || 0;
@@ -214,104 +159,172 @@ async function fetchAll() {
         gross += (a.sTotal - a.sAvail) * (a.price || 0);
       });
 
-      const newShow = {
+      const newEntry = {
+        city,
+        state,
+        venue: venue.name,
         time: showTime.format('hh:mm A'),
         audi: session.audi || '',
         totalSeats: total,
         available: avail,
         sold,
         gross,
+        occupancy: total ? `${((sold / total) * 100).toFixed(2)}%` : '0%',
         minsLeft: minutesLeft,
-        venue: venue.name,
-        city,
-        state,
-        chain,
       };
 
-      // Check for existing entry (venue, time, audi)
-      const existingIndex = existingShows[key].findIndex(e =>
-        e.venue === venue.name &&
-        e.time === newShow.time &&
-        e.audi === newShow.audi
+      const existingIndex = detailedOutput[key].findIndex(
+        e => e.venue === venue.name &&
+             e.time === newEntry.time &&
+             e.audi === newEntry.audi
       );
       if (existingIndex !== -1) {
-        existingShows[key][existingIndex] = newShow;
+        detailedOutput[key][existingIndex] = newEntry;
       } else {
-        existingShows[key].push(newShow);
+        detailedOutput[key].push(newEntry);
       }
     }
   }
 
-  // 3. Build dictionaries from all shows (union of all movies)
-  const allShows = Object.values(existingShows).flat();
-  const dicts = buildDictionaries(allShows);
+  // 3. Build summary from detailedOutput
+  const summary = {};
+  for (const [movieKey, shows] of Object.entries(detailedOutput)) {
+    if (movieKey === 'date' || movieKey === 'lastUpdated') continue;
+    if (!Array.isArray(shows)) continue;
 
-  // 4. Compress each movie's shows
-  const compressedMovies = {};
-  for (const [movie, shows] of Object.entries(existingShows)) {
-    compressedMovies[movie] = compressShows(shows, dicts.forward);
+    summary[movieKey] = {
+      shows: 0,
+      gross: 0,
+      sold: 0,
+      totalSeats: 0,
+      venues: new Set(),
+      cities: new Set(),
+      fastfilling: 0,
+      housefull: 0,
+      cityDetails: {},
+    };
+
+    for (const s of shows) {
+      const total = Number(s.totalSeats || 0);
+      const sold = Number(s.sold || 0);
+      const gross = Number(s.gross || 0);
+      const occ = total ? (sold / total) * 100 : 0;
+
+      summary[movieKey].shows++;
+      summary[movieKey].gross += gross;
+      summary[movieKey].sold += sold;
+      summary[movieKey].totalSeats += total;
+      summary[movieKey].venues.add(s.venue);
+      summary[movieKey].cities.add(s.city);
+
+      if (occ >= 50 && occ < 98) summary[movieKey].fastfilling++;
+      if (occ >= 98) summary[movieKey].housefull++;
+
+      const cityStateKey = `${s.city} | ${s.state}`;
+      if (!summary[movieKey].cityDetails[cityStateKey]) {
+        summary[movieKey].cityDetails[cityStateKey] = {
+          city: s.city,
+          state: s.state,
+          shows: 0,
+          gross: 0,
+          sold: 0,
+          totalSeats: 0,
+          fastfilling: 0,
+          housefull: 0,
+        };
+      }
+      const c = summary[movieKey].cityDetails[cityStateKey];
+      c.shows++;
+      c.gross += gross;
+      c.sold += sold;
+      c.totalSeats += total;
+      if (occ >= 50 && occ < 98) c.fastfilling++;
+      if (occ >= 98) c.housefull++;
+    }
   }
 
-  // 5. Update monthly logs (top 50 by gross)
+  // Build final summary object (with city venue counts)
+  const finalSummaryData = {};
+  for (const [movie, vals] of Object.entries(summary)) {
+    finalSummaryData[movie] = {
+      shows: vals.shows,
+      gross: +vals.gross.toFixed(2),
+      sold: vals.sold,
+      totalSeats: vals.totalSeats,
+      venues: vals.venues.size,
+      cities: vals.cities.size,
+      fastfilling: vals.fastfilling,
+      housefull: vals.housefull,
+      occupancy: vals.totalSeats ? +(vals.sold / vals.totalSeats * 100).toFixed(2) : 0,
+      details: Object.values(vals.cityDetails).map(d => {
+        // compute venues for this city (from detailedOutput)
+        const cityVenues = new Set();
+        if (detailedOutput[movie]) {
+          detailedOutput[movie].forEach(s => {
+            if (s.city === d.city && s.state === d.state) cityVenues.add(s.venue);
+          });
+        }
+        return {
+          city: d.city,
+          state: d.state,
+          shows: d.shows,
+          gross: +d.gross.toFixed(2),
+          sold: d.sold,
+          venues: cityVenues.size,
+          fastfilling: d.fastfilling,
+          housefull: d.housefull,
+          occupancy: d.totalSeats ? +(d.sold / d.totalSeats * 100).toFixed(2) : 0,
+        };
+      }),
+    };
+  }
+
+  // 4. Monthly logs (top 50 by gross)
   let monthlyLogs = {};
   if (fs.existsSync(monthlyLogPath)) {
     try { monthlyLogs = JSON.parse(fs.readFileSync(monthlyLogPath, 'utf8')); } catch { monthlyLogs = {}; }
   }
 
-  // Compute summary from existingShows
-  const summary = {};
-  for (const [movie, shows] of Object.entries(existingShows)) {
-    let totalGross = 0, totalSold = 0, totalShows = 0, totalSeats = 0;
-    for (const s of shows) {
-      totalGross += s.gross;
-      totalSold += s.sold;
-      totalShows++;
-      totalSeats += s.totalSeats;
-    }
-    summary[movie] = { gross: totalGross, sold: totalSold, shows: totalShows, seats: totalSeats };
-  }
-  const top50 = Object.entries(summary)
+  const roundedLabel = roundToHourLabel(nowIST);
+  const stamp = `${roundedLabel}, ${nowIST.format('DD/MM/YYYY')}`;
+
+  const top50 = Object.entries(finalSummaryData)
     .sort((a, b) => b[1].gross - a[1].gross)
     .slice(0, 50);
 
-  const roundedLabel = roundToHourLabel(nowIST);
-  const stamp = `${roundedLabel}, ${nowIST.format('DD/MM/YYYY')}`;
   for (const [movie, data] of top50) {
     if (!monthlyLogs[movie]) monthlyLogs[movie] = {};
-    monthlyLogs[movie][stamp] = [
-      Math.round(data.gross * 100), // gross in paisa
-      data.sold,
-      data.shows,
-      data.seats ? Math.round((data.sold / data.seats) * 10000) : 0, // occupancy bp
-    ];
+    monthlyLogs[movie][stamp] = {
+      gross: data.gross,
+      tickets: data.sold,
+      occ: `${data.occupancy}%`,
+      shows: data.shows,
+    };
   }
 
-  // 6. Write compressed detailed file with embedded dictionaries
-  const outputDetailed = {
+  // 5. Write output files
+  const formattedLastUpdated = nowIST.format('hh:mm A, DD MMMM YYYY');
+
+  const outputSummary = {
     date: DATE,
-    lastUpdated: nowIST.format('hh:mm A, DD MMMM YYYY'),
-    dicts: dicts.forward,
-    movies: compressedMovies,
+    lastUpdated: formattedLastUpdated,
+    ...finalSummaryData,
   };
 
-  const newDetailed = CONFIG.PRETTY ? JSON.stringify(outputDetailed, null, 2) : JSON.stringify(outputDetailed);
-  const oldDetailed = fs.existsSync(detailedPath) ? fs.readFileSync(detailedPath, 'utf8') : '';
-  if (newDetailed !== oldDetailed) {
-    fs.writeFileSync(detailedPath, newDetailed, 'utf8');
-    console.log(`✅ Updated detailed: ${detailedPath}`);
-  } else {
-    console.log(`⏭️ No changes to detailed: ${detailedPath}`);
-  }
+  const outputDetailed = {
+    date: DATE,
+    lastUpdated: formattedLastUpdated,
+    ...detailedOutput,
+  };
 
-  // Write monthly logs (also respect PRETTY)
-  const newLog = CONFIG.PRETTY ? JSON.stringify(monthlyLogs, null, 2) : JSON.stringify(monthlyLogs);
-  const oldLog = fs.existsSync(monthlyLogPath) ? fs.readFileSync(monthlyLogPath, 'utf8') : '';
-  if (newLog !== oldLog) {
-    fs.writeFileSync(monthlyLogPath, newLog, 'utf8');
-    console.log(`✅ Updated logs: ${monthlyLogPath}`);
-  } else {
-    console.log(`⏭️ No changes to logs: ${monthlyLogPath}`);
-  }
+  const stringify = (obj) => CONFIG.PRETTY ? JSON.stringify(obj, null, 2) : JSON.stringify(obj);
 
+  fs.writeFileSync(summaryPath, stringify(outputSummary), 'utf8');
+  fs.writeFileSync(detailedPath, stringify(outputDetailed), 'utf8');
+  fs.writeFileSync(monthlyLogPath, stringify(monthlyLogs), 'utf8');
+
+  console.log(`✅ Summary saved: ${summaryPath}`);
+  console.log(`✅ Detailed saved: ${detailedPath}`);
+  console.log(`✅ Monthly logs saved: ${monthlyLogPath}`);
   console.log('✅ Daily Boxoffice completed.');
 })();
