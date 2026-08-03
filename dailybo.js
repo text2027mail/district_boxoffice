@@ -1,10 +1,12 @@
-// dailybo.js – Enterprise-grade Daily Boxoffice
+// dailybo.js – Enterprise-grade Daily Boxoffice (Supercompressed format)
 // Output directories can be overridden by env vars:
 //   BOXOFFICE_DIR (default ./boxoffice)
 //   LOGS_DIR      (default ./logs)
+//   PRETTY        – set to 'true' for pretty-printed JSON (default false)
 
 require('dotenv').config();
 const fs = require('fs');
+const fsPromises = fs.promises;
 const path = require('path');
 const fetch = require('node-fetch');
 const dayjs = require('dayjs');
@@ -24,6 +26,7 @@ const CONFIG = {
   FETCH_CONCURRENCY: 10,
   BOXOFFICE_DIR: process.env.BOXOFFICE_DIR || './boxoffice',
   LOGS_DIR: process.env.LOGS_DIR || './logs',
+  PRETTY: process.env.PRETTY === 'true',
 };
 
 // Ensure directories exist
@@ -34,50 +37,7 @@ function ensureDirs() {
 }
 ensureDirs();
 
-// ------------------------- HELPERS -------------------------
-function formatState(stateStr) {
-  if (!stateStr || typeof stateStr !== 'string') return 'Unknown';
-  return stateStr.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
-function roundToHourLabel(timeObj) {
-  const mins = timeObj.minute();
-  let hour = timeObj.hour();
-  if (mins > 45) hour += 1;
-  return dayjs(timeObj).hour(hour).minute(0).format('hA');
-}
-
-// ------------------------- FETCH WITH RETRIES -------------------------
-async function fetchWithRetry(url, headers, attempts = CONFIG.RETRY_ATTEMPTS) {
-  for (let i = 0; i < attempts; i++) {
-    try {
-      const resp = await fetch(url, { headers, timeout: 20000 });
-      if (resp.ok) return await resp.json();
-    } catch (err) {
-      if (i === attempts - 1) throw err;
-      await new Promise(r => setTimeout(r, CONFIG.RETRY_DELAY * (i + 1)));
-    }
-  }
-  return null;
-}
-
-async function fetchVenueData(venue) {
-  const url = CONFIG.API_URL.replace('{cid}', venue.id).replace('{date}', DATE);
-  try {
-    const data = await fetchWithRetry(url, {
-      'User-Agent': process.env.WORKER_UA,
-      'x-api-key': process.env.WORKER_KEY,
-    });
-    if (!data) return null;
-    const sessionDates = data?.data?.sessionDates || [];
-    if (!sessionDates.includes(DATE)) return null;
-    return { venue, data };
-  } catch {
-    return null;
-  }
-}
-
-// ------------------------- COMPRESS / DECOMPRESS (with embedded dictionaries) -------------------------
+// ------------------------- COMPRESSION / DECOMPRESSION (from fetchold.js) -------------------------
 function buildDictionaries(shows) {
   const dicts = {
     cities: {}, states: {}, venues: {}, chains: {}, showtimes: {}, audis: {},
@@ -107,8 +67,8 @@ function compressShows(shows, dicts) {
     const total = s.totalSeats || 0;
     const avail = s.available || 0;
     const sold = s.sold || 0;
-    const gross = Math.round(s.gross * 100); // paisa
-    const occupancy = total ? Math.round((sold / total) * 10000) : 0; // basis points
+    const gross = Math.round(s.gross * 100);
+    const occupancy = total ? Math.round((sold / total) * 10000) : 0;
     const minsLeft = s.minsLeft || 0;
     return [cityId, stateId, venueId, chainId, timeId, audiId, total, avail, sold, gross, occupancy, minsLeft];
   });
@@ -137,6 +97,43 @@ function decompressShow(arr, dicts) {
     occupancy: (arr[10] / 100).toFixed(2) + '%',
     minsLeft: arr[11],
   };
+}
+
+// ------------------------- HELPERS (other) -------------------------
+function roundToHourLabel(timeObj) {
+  const mins = timeObj.minute();
+  let hour = timeObj.hour();
+  if (mins > 45) hour += 1;
+  return dayjs(timeObj).hour(hour).minute(0).format('hA');
+}
+
+async function fetchWithRetry(url, headers, attempts = CONFIG.RETRY_ATTEMPTS) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const resp = await fetch(url, { headers, timeout: 20000 });
+      if (resp.ok) return await resp.json();
+    } catch (err) {
+      if (i === attempts - 1) throw err;
+      await new Promise(r => setTimeout(r, CONFIG.RETRY_DELAY * (i + 1)));
+    }
+  }
+  return null;
+}
+
+async function fetchVenueData(venue) {
+  const url = CONFIG.API_URL.replace('{cid}', venue.id).replace('{date}', DATE);
+  try {
+    const data = await fetchWithRetry(url, {
+      'User-Agent': process.env.WORKER_UA,
+      'x-api-key': process.env.WORKER_KEY,
+    });
+    if (!data) return null;
+    const sessionDates = data?.data?.sessionDates || [];
+    if (!sessionDates.includes(DATE)) return null;
+    return { venue, data };
+  } catch {
+    return null;
+  }
 }
 
 // ------------------------- MAIN LOGIC -------------------------
@@ -187,7 +184,7 @@ async function fetchAll() {
     if (!res) continue;
     const { venue, data } = res;
     const city = venue.city;
-    const state = formatState(venue.state);
+    const state = venue.state || 'Unknown';   // raw, no formatting – matches fetchold.js
     const chain = venue.chainKey || 'Unknown';
 
     const moviesMap = {};
@@ -297,22 +294,20 @@ async function fetchAll() {
     movies: compressedMovies,
   };
 
-  const newStr = JSON.stringify(outputDetailed, null, 2);
-  let oldStr = '';
-  if (fs.existsSync(detailedPath)) {
-    oldStr = fs.readFileSync(detailedPath, 'utf8');
-  }
-  if (newStr !== oldStr) {
-    fs.writeFileSync(detailedPath, newStr, 'utf8');
+  const newDetailed = CONFIG.PRETTY ? JSON.stringify(outputDetailed, null, 2) : JSON.stringify(outputDetailed);
+  const oldDetailed = fs.existsSync(detailedPath) ? fs.readFileSync(detailedPath, 'utf8') : '';
+  if (newDetailed !== oldDetailed) {
+    fs.writeFileSync(detailedPath, newDetailed, 'utf8');
     console.log(`✅ Updated detailed: ${detailedPath}`);
   } else {
     console.log(`⏭️ No changes to detailed: ${detailedPath}`);
   }
 
-  // Write monthly logs (already compressed)
-  const logStr = JSON.stringify(monthlyLogs, null, 2);
-  if (!fs.existsSync(monthlyLogPath) || logStr !== fs.readFileSync(monthlyLogPath, 'utf8')) {
-    fs.writeFileSync(monthlyLogPath, logStr, 'utf8');
+  // Write monthly logs (also respect PRETTY)
+  const newLog = CONFIG.PRETTY ? JSON.stringify(monthlyLogs, null, 2) : JSON.stringify(monthlyLogs);
+  const oldLog = fs.existsSync(monthlyLogPath) ? fs.readFileSync(monthlyLogPath, 'utf8') : '';
+  if (newLog !== oldLog) {
+    fs.writeFileSync(monthlyLogPath, newLog, 'utf8');
     console.log(`✅ Updated logs: ${monthlyLogPath}`);
   } else {
     console.log(`⏭️ No changes to logs: ${monthlyLogPath}`);
