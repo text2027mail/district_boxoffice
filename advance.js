@@ -1,12 +1,9 @@
-// advance.js – Daily Advance (tomorrow) – Supercompressed format
-// Output directory: ADVANCE_DIR (default ./advance)
-// Environment:
-//   ADVANCE_DIR  – output directory (default ./advance)
-//   PRETTY       – set to 'true' for pretty-printed JSON (default false)
+// advancebo.js – Enterprise‑grade Daily Advance Bookings (Supercompressed format)
+// Output directory can be overridden by env var: ADVANCE_DIR (default ./advance)
+//   PRETTY – set to 'true' for pretty-printed JSON (default false)
 
 require('dotenv').config();
 const fs = require('fs');
-const fsPromises = fs.promises;
 const path = require('path');
 const fetch = require('node-fetch');
 const dayjs = require('dayjs');
@@ -20,19 +17,23 @@ dayjs.extend(timezone);
 const CONFIG = {
   API_URL: 'https://districtvenues.text2027mail.workers.dev/?cinema_id={cid}&date={date}',
   VENUES_FILE: 'districtvenues.json',
+  CUTOFF_MINS: 200,              // not critical for advance, but keep
   RETRY_ATTEMPTS: 3,
   RETRY_DELAY: 1000,
-  FETCH_CONCURRENCY: 10,
+  FETCH_CONCURRENCY: 30,
   ADVANCE_DIR: process.env.ADVANCE_DIR || './advance',
-  PRETTY: process.env.PRETTY === 'true', // default false
+  PRETTY: process.env.PRETTY === 'true',
 };
 
 // Ensure directory exists
-if (!fs.existsSync(CONFIG.ADVANCE_DIR)) {
-  fs.mkdirSync(CONFIG.ADVANCE_DIR, { recursive: true });
+function ensureDirs() {
+  if (!fs.existsSync(CONFIG.ADVANCE_DIR)) {
+    fs.mkdirSync(CONFIG.ADVANCE_DIR, { recursive: true });
+  }
 }
+ensureDirs();
 
-// ------------------------- COMPRESSION / DECOMPRESSION (identical to fetchold.js) -------------------------
+// ------------------------- COMPRESSION / DECOMPRESSION (unchanged) -------------------------
 function buildDictionaries(shows) {
   const dicts = {
     cities: {}, states: {}, venues: {}, chains: {}, showtimes: {}, audis: {},
@@ -64,8 +65,8 @@ function compressShows(shows, dicts) {
     const sold = s.sold || 0;
     const gross = Math.round(s.gross * 100);
     const occupancy = total ? Math.round((sold / total) * 10000) : 0;
-    // minsLeft always 0 for advance bookings (no cutoff)
-    return [cityId, stateId, venueId, chainId, timeId, audiId, total, avail, sold, gross, occupancy, 0];
+    const minsLeft = s.minsLeft || 0;
+    return [cityId, stateId, venueId, chainId, timeId, audiId, total, avail, sold, gross, occupancy, minsLeft];
   });
 }
 
@@ -94,7 +95,20 @@ function decompressShow(arr, dicts) {
   };
 }
 
-// ------------------------- FETCH HELPERS -------------------------
+// ------------------------- HELPERS -------------------------
+function simplifyKey(rawKey) {
+  // Convert "Movie [Format | Language]" -> "Movie | Language"
+  const bracketMatch = rawKey.match(/^(.+?)\s*\[([^\]]+)\]\s*$/);
+  if (bracketMatch) {
+    const fullName = bracketMatch[1].trim();
+    const inside = bracketMatch[2].trim();
+    const parts = inside.split('|').map(s => s.trim());
+    const lang = parts[parts.length - 1];
+    return `${fullName} | ${lang}`;
+  }
+  return rawKey;
+}
+
 async function fetchWithRetry(url, headers, attempts = CONFIG.RETRY_ATTEMPTS) {
   for (let i = 0; i < attempts; i++) {
     try {
@@ -108,28 +122,37 @@ async function fetchWithRetry(url, headers, attempts = CONFIG.RETRY_ATTEMPTS) {
   return null;
 }
 
-async function fetchVenueData(venue) {
+async function fetchVenueData(venue, index, total) {
   const url = CONFIG.API_URL.replace('{cid}', venue.id).replace('{date}', DATE);
   try {
     const data = await fetchWithRetry(url, {
       'User-Agent': process.env.WORKER_UA,
       'x-api-key': process.env.WORKER_KEY,
     });
-    if (!data) return null;
+    if (!data) {
+      console.log(`⚠️ [${index}/${total}] ${venue.id} – no data after retries`);
+      return null;
+    }
     const sessionDates = data?.data?.sessionDates || [];
-    if (!sessionDates.includes(DATE)) return null;
+    if (!sessionDates.includes(DATE)) {
+      console.log(`⏭️ [${index}/${total}] ${venue.id} – no shows for ${DATE}`);
+      return null;
+    }
+    console.log(`✅ [${index}/${total}] ${venue.id} – fetched (${sessionDates.length} dates)`);
     return { venue, data };
-  } catch {
+  } catch (err) {
+    console.log(`❌ [${index}/${total}] ${venue.id} – error: ${err.message}`);
     return null;
   }
 }
 
-// ------------------------- MAIN LOGIC -------------------------
+// ------------------------- MAIN (tomorrow's date) -------------------------
 const nowIST = dayjs().tz('Asia/Kolkata');
-const DATE = nowIST.add(1, 'day').format('YYYY-MM-DD');
+const DATE = nowIST.add(1, 'day').format('YYYY-MM-DD');   // +1 day
+
 const detailedPath = path.join(CONFIG.ADVANCE_DIR, `${DATE}_Detailed.json`);
 
-// Load existing advance data (if any)
+// Load existing detailed (if any)
 let existingShows = {};
 if (fs.existsSync(detailedPath)) {
   try {
@@ -137,36 +160,48 @@ if (fs.existsSync(detailedPath)) {
     if (oldData.movies) {
       for (const [movie, compressedShows] of Object.entries(oldData.movies)) {
         if (movie === 'date' || movie === 'lastUpdated' || movie === 'dicts') continue;
-        existingShows[movie] = compressedShows.map(arr => decompressShow(arr, oldData.dicts));
+        const simpleKey = simplifyKey(movie);
+        if (!existingShows[simpleKey]) existingShows[simpleKey] = [];
+        const decompressed = compressedShows.map(arr => decompressShow(arr, oldData.dicts));
+        existingShows[simpleKey].push(...decompressed);
       }
     }
-  } catch { existingShows = {}; }
+  } catch (err) {
+    console.warn('⚠️ Could not load old detailed file, starting fresh.', err.message);
+    existingShows = {};
+  }
 }
 
-// Load venues
 const VENUES = JSON.parse(fs.readFileSync(CONFIG.VENUES_FILE, 'utf8'));
 
-// Fetch all venues with concurrency
 async function fetchAll() {
   const results = [];
   const concurrency = CONFIG.FETCH_CONCURRENCY;
-  for (let i = 0; i < VENUES.length; i += concurrency) {
+  const total = VENUES.length;
+  console.log(`📡 Fetching ${total} venues (concurrency ${concurrency}) for ${DATE}...`);
+  let completed = 0;
+  for (let i = 0; i < total; i += concurrency) {
     const chunk = VENUES.slice(i, i + concurrency);
-    const chunkResults = await Promise.all(chunk.map(v => fetchVenueData(v)));
+    const chunkPromises = chunk.map((v, idx) => fetchVenueData(v, i + idx + 1, total));
+    const chunkResults = await Promise.all(chunkPromises);
     results.push(...chunkResults);
+    completed += chunk.length;
+    console.log(`📊 Progress: ${completed}/${total} venues processed`);
   }
   return results;
 }
 
 (async function main() {
-  console.log(`📅 Daily Advance for ${DATE}`);
+  const startTime = Date.now();
+  console.log(`📅 Advance Bookings for ${DATE}`);
 
+  // 1. Fetch live data
   const results = await fetchAll();
 
+  // 2. Update existingShows with new shows (only if within cutoff; for advance we keep all)
   for (const res of results) {
     if (!res) continue;
     const { venue, data } = res;
-    // Keep state and chain raw – no formatting, matches fetchold.js
     const city = venue.city;
     const state = venue.state || 'Unknown';
     const chain = venue.chainKey || 'Unknown';
@@ -178,11 +213,14 @@ async function fetchAll() {
       const movie = moviesMap[session.mid];
       if (!movie) continue;
 
+      const showTime = dayjs.utc(session.showTime).tz('Asia/Kolkata');
+      // For advance, we don't filter by cutoff; keep all shows for tomorrow
+      // const minutesLeft = showTime.diff(nowIST, 'minute');
+      // if (minutesLeft >= CONFIG.CUTOFF_MINS) continue;
+
       const name = movie.name;
       const lang = session.lang || movie.lang || '';
-      const format = session.scrnFmt || '';
-      const formattedFormat = format ? format.replace(/-/g, ' | ') : '';
-      const key = formattedFormat ? `${name} [${formattedFormat} | ${lang}]` : `${name} | ${lang}`;
+      const key = `${name} | ${lang}`;   // Simple key – merges all formats
 
       if (!existingShows[key]) existingShows[key] = [];
 
@@ -195,19 +233,19 @@ async function fetchAll() {
       });
 
       const newShow = {
-        time: session.showTime ? dayjs.utc(session.showTime).tz('Asia/Kolkata').format('hh:mm A') : '',
+        time: showTime.format('hh:mm A'),
         audi: session.audi || '',
         totalSeats: total,
         available: avail,
         sold,
         gross,
+        minsLeft: 0,   // not used for advance
         venue: venue.name,
         city,
         state,
         chain,
       };
 
-      // Update or append (same venue/time/audi)
       const existingIndex = existingShows[key].findIndex(e =>
         e.venue === venue.name &&
         e.time === newShow.time &&
@@ -221,34 +259,32 @@ async function fetchAll() {
     }
   }
 
-  // Build dictionaries from all shows
+  // 3. Build dictionaries from all shows
   const allShows = Object.values(existingShows).flat();
   const dicts = buildDictionaries(allShows);
 
+  // 4. Compress each movie's shows
   const compressedMovies = {};
   for (const [movie, shows] of Object.entries(existingShows)) {
     compressedMovies[movie] = compressShows(shows, dicts.forward);
   }
 
+  // 5. Write compressed detailed file (no summary, no logs)
   const outputDetailed = {
     date: DATE,
     lastUpdated: nowIST.format('hh:mm A, DD MMMM YYYY'),
     dicts: dicts.forward,
     movies: compressedMovies,
   };
-
-  // Write with minified JSON by default (unless PRETTY=true)
-  const newStr = CONFIG.PRETTY ? JSON.stringify(outputDetailed, null, 2) : JSON.stringify(outputDetailed);
-  let oldStr = '';
-  if (fs.existsSync(detailedPath)) {
-    oldStr = fs.readFileSync(detailedPath, 'utf8');
-  }
-  if (newStr !== oldStr) {
-    fs.writeFileSync(detailedPath, newStr, 'utf8');
-    console.log(`✅ Updated advance: ${detailedPath}`);
+  const newDetailed = CONFIG.PRETTY ? JSON.stringify(outputDetailed, null, 2) : JSON.stringify(outputDetailed);
+  const oldDetailed = fs.existsSync(detailedPath) ? fs.readFileSync(detailedPath, 'utf8') : '';
+  if (newDetailed !== oldDetailed) {
+    fs.writeFileSync(detailedPath, newDetailed, 'utf8');
+    console.log(`✅ Updated detailed: ${detailedPath}`);
   } else {
-    console.log(`⏭️ No changes to advance: ${detailedPath}`);
+    console.log(`⏭️ No changes to detailed: ${detailedPath}`);
   }
 
-  console.log('✅ Daily Advance completed.');
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`✅ Advance bookings completed in ${elapsed}s.`);
 })();
