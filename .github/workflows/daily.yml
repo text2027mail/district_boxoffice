@@ -1,0 +1,41 @@
+name: Daily Boxoffice & Advance
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'   # every 2 hours
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run Daily Boxoffice
+        env:
+          WORKER_UA: ${{ secrets.WORKER_UA }}
+          WORKER_KEY: ${{ secrets.WORKER_KEY }}
+        run: node dailybo.js
+
+      - name: Run Daily Advance
+        env:
+          WORKER_UA: ${{ secrets.WORKER_UA }}
+          WORKER_KEY: ${{ secrets.WORKER_KEY }}
+        run: node advance.js
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add districtdata2026/
+          git diff --staged --quiet || git commit -m "Auto-update boxoffice/advance"
+          git push
