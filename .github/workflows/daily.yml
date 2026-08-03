@@ -8,9 +8,21 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    env:
+      PRIVATE_REPO: "your-username/PVTDistrictRepo2026"   # change to your private repo
+      PRIVATE_BRANCH: "main"
+      PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+
     steps:
-      - name: Checkout
+      - name: Checkout public repo (code)
         uses: actions/checkout@v3
+        with:
+          path: code
+
+      - name: Clone private data repo using PAT
+        run: |
+          git clone https://x-access-token:${PAT}@github.com/${PRIVATE_REPO} data
+        working-directory: .
 
       - name: Setup Node.js
         uses: actions/setup-node@v3
@@ -18,24 +30,34 @@ jobs:
           node-version: '18'
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          cd code
+          npm install
 
       - name: Run Daily Boxoffice
         env:
           WORKER_UA: ${{ secrets.WORKER_UA }}
           WORKER_KEY: ${{ secrets.WORKER_KEY }}
-        run: node dailybo.js
+          BOXOFFICE_DIR: ${{ github.workspace }}/data/boxoffice
+          LOGS_DIR: ${{ github.workspace }}/data/logs
+        run: |
+          cd code
+          node dailybo.js
 
       - name: Run Daily Advance
         env:
           WORKER_UA: ${{ secrets.WORKER_UA }}
           WORKER_KEY: ${{ secrets.WORKER_KEY }}
-        run: node advance.js
-
-      - name: Commit and push changes
+          ADVANCE_DIR: ${{ github.workspace }}/data/advance
         run: |
+          cd code
+          node advance.js
+
+      - name: Commit and push changes to private repo
+        run: |
+          cd data
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add districtdata2026/
+          git add boxoffice/ advance/ logs/
           git diff --staged --quiet || git commit -m "Auto-update boxoffice/advance"
-          git push
+          git push origin ${PRIVATE_BRANCH}
