@@ -4,74 +4,154 @@ on:
   workflow_dispatch:
     inputs:
       start_date:
-        description: 'Start date (YYYY-MM-DD) – defaults to 2025-08-01'
+        description: "Start date (YYYY-MM-DD)"
         required: false
-        default: '2025-08-01'
+        default: "2025-08-01"
         type: string
+
       end_date:
-        description: 'End date (YYYY-MM-DD) – defaults to today'
+        description: "End date (YYYY-MM-DD, blank = today)"
         required: false
-        default: ''
+        default: ""
         type: string
-  # Optional: run on a schedule (e.g., daily at 02:00) to catch up
-  # schedule:
-  #   - cron: '0 2 * * *'
 
 jobs:
   migrate:
     runs-on: ubuntu-latest
+
     env:
-      PRIVATE_REPO: "text2027mail/DistrictData2026"   # CHANGE THIS
-      PRIVATE_BRANCH: "main"
+      PRIVATE_REPO: text2027mail/DistrictData2026
+      PRIVATE_BRANCH: main
+
       PAT: ${{ secrets.PRIVATE_REPO_PAT }}
 
     steps:
-      # 1. Checkout public repository (contains the scripts)
-      - name: Checkout public repo (code)
-        uses: actions/checkout@v3
+
+      ####################################################
+      # Checkout this repository (contains fetchold.js)
+      ####################################################
+
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
           path: code
 
-      # 2. Clone private data repository using PAT
-      - name: Clone private data repo using PAT
-        run: |
-          git clone https://x-access-token:${PAT}@github.com/${PRIVATE_REPO} data
-        working-directory: .
+      ####################################################
+      # Verify PAT
+      ####################################################
 
-      # 3. Setup Node.js
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
+      - name: Verify PAT
+        shell: bash
+        run: |
+
+          echo "Repository : ${PRIVATE_REPO}"
+
+          if [ -z "$PAT" ]; then
+            echo "❌ PAT secret is EMPTY"
+            exit 1
+          fi
+
+          echo "PAT length: ${#PAT}"
+
+      ####################################################
+      # Test GitHub API authentication
+      ####################################################
+
+      - name: Test GitHub Authentication
+        shell: bash
+        run: |
+
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: token ${PAT}" \
+          https://api.github.com/repos/${PRIVATE_REPO})
+
+          echo "HTTP Status: $STATUS"
+
+          if [ "$STATUS" != "200" ]; then
+            echo "❌ GitHub authentication failed."
+            exit 1
+          fi
+
+          echo "✅ Authentication OK"
+
+      ####################################################
+      # Clone destination repository
+      ####################################################
+
+      - name: Clone Private Repository
+        shell: bash
+        run: |
+
+          git clone \
+          https://x-access-token:${PAT}@github.com/${PRIVATE_REPO}.git \
+          data
+
+      ####################################################
+      # Setup Node
+      ####################################################
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: 20
 
-      # 4. Install dependencies
+      ####################################################
+      # Install packages
+      ####################################################
+
       - name: Install dependencies
-        run: |
-          cd code
-          npm install
+        working-directory: code
+        run: npm install
 
-      # 5. Run the migration script (fetchold.js)
-      #    It will download boxoffice, advance, and logs from the old public repo
-      #    and convert them to the new compressed format.
+      ####################################################
+      # Run migration
+      ####################################################
+
       - name: Run fetchold.js
+        working-directory: code
         env:
           BOXOFFICE_DIR: ${{ github.workspace }}/data/boxoffice
           ADVANCE_DIR: ${{ github.workspace }}/data/advance
           LOGS_DIR: ${{ github.workspace }}/data/logs
-          # Override start/end dates if provided as inputs (the script reads dayjs by default)
-          # We can pass them as environment variables, but fetchold.js doesn't currently support
-          # custom date ranges – it uses hardcoded start (2025-08-01) and today.
-          # If you need custom ranges, you can modify fetchold.js to read these env vars.
+
+          START_DATE: ${{ github.event.inputs.start_date }}
+          END_DATE: ${{ github.event.inputs.end_date }}
         run: |
-          cd code
+
           node fetchold.js
 
-      # 6. Commit and push changes to private repo
-      - name: Commit and push changes to private repo
+      ####################################################
+      # Commit
+      ####################################################
+
+      - name: Commit Changes
+        shell: bash
+        working-directory: data
         run: |
-          cd data
+
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add boxoffice/ advance/ logs/
-          git diff --staged --quiet || git commit -m "Historical data migration via fetchold.js"
-          git push origin ${PRIVATE_BRANCH}
+
+          git add .
+
+          if git diff --cached --quiet
+          then
+            echo "No changes."
+            exit 0
+          fi
+
+          git commit -m "Historical migration"
+
+      ####################################################
+      # Push
+      ####################################################
+
+      - name: Push
+        working-directory: data
+        env:
+          PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+        run: |
+
+          git push \
+          https://x-access-token:${PAT}@github.com/${PRIVATE_REPO}.git \
+          HEAD:${PRIVATE_BRANCH}
