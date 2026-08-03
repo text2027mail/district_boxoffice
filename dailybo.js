@@ -37,7 +37,7 @@ function ensureDirs() {
 }
 ensureDirs();
 
-// ------------------------- COMPRESSION / DECOMPRESSION -------------------------
+// ------------------------- COMPRESSION / DECOMPRESSION (unchanged) -------------------------
 function buildDictionaries(shows) {
   const dicts = {
     cities: {}, states: {}, venues: {}, chains: {}, showtimes: {}, audis: {},
@@ -99,7 +99,7 @@ function decompressShow(arr, dicts) {
   };
 }
 
-// ------------------------- HELPERS -------------------------
+// ------------------------- HELPERS (unchanged) -------------------------
 function roundToHourLabel(timeObj) {
   const mins = timeObj.minute();
   let hour = timeObj.hour();
@@ -144,7 +144,7 @@ async function fetchVenueData(venue, index, total) {
   }
 }
 
-// ------------------------- MAIN -------------------------
+// ------------------------- MAIN LOGIC -------------------------
 const nowIST = dayjs().tz('Asia/Kolkata');
 const DATE = nowIST.format('YYYY-MM-DD');
 const MONTH_YEAR = nowIST.format('MM-YYYY');
@@ -213,9 +213,9 @@ async function fetchAll() {
 
       const name = movie.name;
       const lang = session.lang || movie.lang || '';
-      const format = session.scrnFmt || '';
-      const formattedFormat = format ? format.replace(/-/g, ' | ') : '';
-      const key = formattedFormat ? `${name} [${formattedFormat} | ${lang}]` : `${name} | ${lang}`;
+
+      // 🔥 FIX: Use the same simple key as old code – merge formats
+      const key = `${name} | ${lang}`;
 
       if (!existingShows[key]) existingShows[key] = [];
 
@@ -239,6 +239,8 @@ async function fetchAll() {
         city,
         state,
         chain,
+        // Optional: we could store format separately, but it's not needed for the main key.
+        // If we want to keep it, we can add: format: session.scrnFmt || ''
       };
 
       const existingIndex = existingShows[key].findIndex(e =>
@@ -254,7 +256,7 @@ async function fetchAll() {
     }
   }
 
-  // 3. Build dictionaries from all shows
+  // 3. Build dictionaries from all shows (union of all movies)
   const allShows = Object.values(existingShows).flat();
   const dicts = buildDictionaries(allShows);
 
@@ -264,8 +266,7 @@ async function fetchAll() {
     compressedMovies[movie] = compressShows(shows, dicts.forward);
   }
 
-  // 5. Update monthly logs (top 50 by gross) – compressed array format
-  //    We need summary data for top 50, so we compute it on the fly
+  // 5. Compute per-movie totals for monthly logs (top 50)
   const summaryForLogs = {};
   for (const [movieKey, shows] of Object.entries(existingShows)) {
     if (!Array.isArray(shows)) continue;
@@ -284,6 +285,7 @@ async function fetchAll() {
     };
   }
 
+  // 6. Update monthly logs (top 50, compressed array format)
   let monthlyLogs = {};
   if (fs.existsSync(monthlyLogPath)) {
     try { monthlyLogs = JSON.parse(fs.readFileSync(monthlyLogPath, 'utf8')); } catch { monthlyLogs = {}; }
@@ -306,7 +308,7 @@ async function fetchAll() {
     ];
   }
 
-  // 6. Write compressed detailed file
+  // 7. Write compressed detailed file
   const outputDetailed = {
     date: DATE,
     lastUpdated: nowIST.format('hh:mm A, DD MMMM YYYY'),
@@ -322,7 +324,7 @@ async function fetchAll() {
     console.log(`⏭️ No changes to detailed: ${detailedPath}`);
   }
 
-  // 7. Write monthly logs (compressed arrays)
+  // 8. Write monthly logs (compressed arrays)
   const newLog = CONFIG.PRETTY ? JSON.stringify(monthlyLogs, null, 2) : JSON.stringify(monthlyLogs);
   const oldLog = fs.existsSync(monthlyLogPath) ? fs.readFileSync(monthlyLogPath, 'utf8') : '';
   if (newLog !== oldLog) {
