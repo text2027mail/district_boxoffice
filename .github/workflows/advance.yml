@@ -1,0 +1,81 @@
+name: Daily Advance (standalone)
+
+on:
+  schedule:
+    # Run every 4 hours at minute 0 (00:00, 04:00, 08:00, ...)
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+    inputs:
+      run_migration:
+        description: 'Run migration (fetchold.js) – downloads historical advance data from old repo'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  update-advance:
+    runs-on: ubuntu-latest
+    env:
+      PRIVATE_REPO: "your-username/PVTDistrictRepo2026"   # CHANGE THIS
+      PRIVATE_BRANCH: "main"
+      PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+
+    steps:
+      # 1. Checkout public repository (contains the scripts)
+      - name: Checkout public repo (code)
+        uses: actions/checkout@v3
+        with:
+          path: code
+
+      # 2. Clone private data repository using PAT
+      - name: Clone private data repo using PAT
+        run: |
+          git clone https://x-access-token:${PAT}@github.com/${PRIVATE_REPO} data
+        working-directory: .
+
+      # 3. Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      # 4. Install dependencies (from code directory)
+      - name: Install dependencies
+        run: |
+          cd code
+          npm install
+
+      # 5. Run migration (ONLY if manually triggered with run_migration = true)
+      #    This will download historical advance data from the old repo.
+      - name: Run migration (fetchold.js) for advance data
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_migration == 'true'
+        env:
+          BOXOFFICE_DIR: ${{ github.workspace }}/data/boxoffice
+          ADVANCE_DIR: ${{ github.workspace }}/data/advance
+          LOGS_DIR: ${{ github.workspace }}/data/logs
+        run: |
+          cd code
+          node fetchold.js
+
+      # 6. Run Daily Advance (always)
+      - name: Run Daily Advance
+        env:
+          WORKER_UA: ${{ secrets.WORKER_UA }}
+          WORKER_KEY: ${{ secrets.WORKER_KEY }}
+          ADVANCE_DIR: ${{ github.workspace }}/data/advance
+        run: |
+          cd code
+          node advance.js
+
+      # 7. Commit and push changes to private repo
+      - name: Commit and push changes to private repo
+        run: |
+          cd data
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add advance/   # only advance directory (logs are not updated here)
+          git diff --staged --quiet || git commit -m "Auto-update advance data"
+          git push origin ${PRIVATE_BRANCH}
