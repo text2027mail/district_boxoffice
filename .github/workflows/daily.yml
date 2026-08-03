@@ -40,7 +40,7 @@ jobs:
           WORKER_KEY: ${{ secrets.WORKER_KEY }}
           BOXOFFICE_DIR: ${{ github.workspace }}/data/boxoffice
           LOGS_DIR: ${{ github.workspace }}/data/logs
-          PRETTY: true   # optional – set to true for readable JSON
+          PRETTY: false   # optional – set to true for readable JSON
         run: |
           cd code
           node dailybo.js
