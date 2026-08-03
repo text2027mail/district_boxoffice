@@ -21,7 +21,7 @@ jobs:
   migrate:
     runs-on: ubuntu-latest
     env:
-      PRIVATE_REPO: "your-username/PVTDistrictRepo2026"   # CHANGE THIS
+      PRIVATE_REPO: "text2027mail/DistrictData2026"   # CHANGE THIS
       PRIVATE_BRANCH: "main"
       PAT: ${{ secrets.PRIVATE_REPO_PAT }}
 
