@@ -107,20 +107,17 @@ function roundToHourLabel(timeObj) {
   return dayjs(timeObj).hour(hour).minute(0).format('hA');
 }
 
-// 🔥 NEW: Convert a key that may include format (e.g., "Movie [3D | English]")
-// to the simple "Movie | English" format used by the old code.
+// Convert a key that may include format (e.g., "Movie [3D | English]")
+// to the simple "Movie | English" format.
 function simplifyKey(rawKey) {
-  // If it contains brackets, extract movie name and language
   const bracketMatch = rawKey.match(/^(.+?)\s*\[([^\]]+)\]\s*$/);
   if (bracketMatch) {
     const fullName = bracketMatch[1].trim();
     const inside = bracketMatch[2].trim();
-    // Split by '|', take the last part as language
     const parts = inside.split('|').map(s => s.trim());
     const lang = parts[parts.length - 1];
     return `${fullName} | ${lang}`;
   }
-  // If no brackets, return as is (already "Movie | Language")
   return rawKey;
 }
 
@@ -177,11 +174,9 @@ if (fs.existsSync(detailedPath)) {
     if (oldData.movies) {
       for (const [movie, compressedShows] of Object.entries(oldData.movies)) {
         if (movie === 'date' || movie === 'lastUpdated' || movie === 'dicts') continue;
-        // 🔥 Convert old key (which may include format) to simple "Movie | Language"
         const simpleKey = simplifyKey(movie);
         if (!existingShows[simpleKey]) existingShows[simpleKey] = [];
         const decompressed = compressedShows.map(arr => decompressShow(arr, oldData.dicts));
-        // Merge (no duplicates because venue+time+audi uniquely identify a show)
         existingShows[simpleKey].push(...decompressed);
       }
     }
@@ -238,9 +233,7 @@ async function fetchAll() {
 
       const name = movie.name;
       const lang = session.lang || movie.lang || '';
-
-      // 🔥 Use the SAME simple key as the old code – no format included
-      const key = `${name} | ${lang}`;
+      const key = `${name} | ${lang}`;   // Simple key – merges all formats
 
       if (!existingShows[key]) existingShows[key] = [];
 
@@ -308,7 +301,7 @@ async function fetchAll() {
     };
   }
 
-  // 6. Update monthly logs (top 50, compressed array format)
+  // 6. Update monthly logs (top 50) – store as OBJECT with gross, tickets, occ, shows
   let monthlyLogs = {};
   if (fs.existsSync(monthlyLogPath)) {
     try { monthlyLogs = JSON.parse(fs.readFileSync(monthlyLogPath, 'utf8')); } catch { monthlyLogs = {}; }
@@ -323,12 +316,14 @@ async function fetchAll() {
 
   for (const [movie, data] of top50) {
     if (!monthlyLogs[movie]) monthlyLogs[movie] = {};
-    monthlyLogs[movie][stamp] = [
-      Math.round(data.gross * 100),   // gross in paisa
-      data.sold,
-      data.shows,
-      data.totalSeats ? Math.round((data.sold / data.totalSeats) * 10000) : 0
-    ];
+    // Store as object with keys: gross (rounded to 2 decimals), tickets, occ (string with %), shows
+    const occValue = data.totalSeats ? ((data.sold / data.totalSeats) * 100) : 0;
+    monthlyLogs[movie][stamp] = {
+      gross: +(data.gross).toFixed(2),      // keep two decimal places
+      tickets: data.sold,
+      occ: occValue.toFixed(2) + '%',
+      shows: data.shows
+    };
   }
 
   // 7. Write compressed detailed file
@@ -347,7 +342,7 @@ async function fetchAll() {
     console.log(`⏭️ No changes to detailed: ${detailedPath}`);
   }
 
-  // 8. Write monthly logs (compressed arrays)
+  // 8. Write monthly logs (now as objects)
   const newLog = CONFIG.PRETTY ? JSON.stringify(monthlyLogs, null, 2) : JSON.stringify(monthlyLogs);
   const oldLog = fs.existsSync(monthlyLogPath) ? fs.readFileSync(monthlyLogPath, 'utf8') : '';
   if (newLog !== oldLog) {
