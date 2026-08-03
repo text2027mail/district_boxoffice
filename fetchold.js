@@ -1,4 +1,4 @@
-// fetchold_parallel.js – Parallel historical migration (concurrency 50) – CHUNKED VERSION
+// fetchold.js – Parallel historical migration with concurrency control
 // Downloads old JSONs from GitHub and converts to new compressed format.
 // Environment variables:
 //   BOXOFFICE_DIR – output for boxoffice (default ./boxoffice)
@@ -77,64 +77,85 @@ function compressShows(shows, dicts) {
 }
 
 // ------------------------- ASYNC DOWNLOAD AND CONVERT -------------------------
-async function downloadAndConvert(url, outFile) {
+/**
+ * Downloads a JSON file from `url`, compresses it, and writes to `outFile`.
+ * Returns an object: { success: boolean, type: 'boxoffice'|'advance'|'log', dateOrMonth: string, statusCode?: number }
+ */
+async function downloadAndConvert(url, outFile, type, dateOrMonth) {
   try {
     const resp = await fetch(url);
     if (!resp.ok) {
-      console.log(`⚠️ Failed to fetch ${url} (status ${resp.status})`);
-      return false;
-    }
-    const data = await resp.json();
-    const movies = {};
-    let totalShows = 0;
-    for (const [key, value] of Object.entries(data)) {
-      if (key === 'date' || key === 'lastUpdated') continue;
-      if (Array.isArray(value)) {
-        const convertedShows = value.map(s => ({
-          city: s.city || 'Unknown',
-          state: s.state || 'Unknown',
-          venue: s.venue || 'Unknown',
-          chain: s.chain || 'Unknown',
-          time: s.time || '',
-          audi: s.audi || '',
-          totalSeats: s.totalSeats || 0,
-          available: s.available || 0,
-          sold: s.sold || 0,
-          gross: s.gross || 0,
-          minsLeft: s.minsLeft || 0,
-        }));
-        movies[key] = convertedShows;
-        totalShows += convertedShows.length;
+      // For logs, 404 is a warning, not an error
+      if (type === 'log' && resp.status === 404) {
+        console.log(`ℹ️ Log ${dateOrMonth} not found (status 404) – skipping`);
+        return { success: true, type, dateOrMonth, statusCode: 404 }; // treat as success (no failure)
       }
+      console.log(`⚠️ Failed to fetch ${url} (status ${resp.status})`);
+      return { success: false, type, dateOrMonth, statusCode: resp.status };
     }
 
-    if (totalShows === 0) {
-      console.log(`⏭️ No shows found in ${url}`);
-      return false;
+    const data = await resp.json();
+
+    // --- For boxoffice / advance ---
+    if (type !== 'log') {
+      const movies = {};
+      let totalShows = 0;
+      for (const [key, value] of Object.entries(data)) {
+        if (key === 'date' || key === 'lastUpdated') continue;
+        if (Array.isArray(value)) {
+          const convertedShows = value.map(s => ({
+            city: s.city || 'Unknown',
+            state: s.state || 'Unknown',
+            venue: s.venue || 'Unknown',
+            chain: s.chain || 'Unknown',
+            time: s.time || '',
+            audi: s.audi || '',
+            totalSeats: s.totalSeats || 0,
+            available: s.available || 0,
+            sold: s.sold || 0,
+            gross: s.gross || 0,
+            minsLeft: s.minsLeft || 0,
+          }));
+          movies[key] = convertedShows;
+          totalShows += convertedShows.length;
+        }
+      }
+
+      if (totalShows === 0) {
+        console.log(`⏭️ No shows found in ${url}`);
+        return { success: false, type, dateOrMonth, reason: 'No shows' };
+      }
+
+      const allShows = Object.values(movies).flat();
+      const dicts = buildDictionaries(allShows);
+      const compressed = {};
+      for (const [movie, shows] of Object.entries(movies)) {
+        compressed[movie] = compressShows(shows, dicts.forward);
+      }
+
+      const output = {
+        date: data.date || '',
+        lastUpdated: data.lastUpdated || '',
+        dicts: dicts.forward,
+        movies: compressed,
+      };
+
+      const jsonString = PRETTY ? JSON.stringify(output, null, 2) : JSON.stringify(output);
+      await fsPromises.writeFile(outFile, jsonString, 'utf8');
+      console.log(`✅ Converted ${outFile} (${totalShows} shows)`);
+      return { success: true, type, dateOrMonth };
     }
 
-    const allShows = Object.values(movies).flat();
-    const dicts = buildDictionaries(allShows);
-    const compressed = {};
-    for (const [movie, shows] of Object.entries(movies)) {
-      compressed[movie] = compressShows(shows, dicts.forward);
-    }
+    // --- For logs ---
+    // Logs are already in the desired format; we just write them as-is (optionally minified)
+    const logString = PRETTY ? JSON.stringify(data, null, 2) : JSON.stringify(data);
+    await fsPromises.writeFile(outFile, logString, 'utf8');
+    console.log(`✅ Log ${dateOrMonth} downloaded.`);
+    return { success: true, type, dateOrMonth };
 
-    const output = {
-      date: data.date || '',
-      lastUpdated: data.lastUpdated || '',
-      dicts: dicts.forward,
-      movies: compressed,
-    };
-
-    // ✅ Write compact JSON (no spaces) unless PRETTY=true
-    const jsonString = PRETTY ? JSON.stringify(output, null, 2) : JSON.stringify(output);
-    await fsPromises.writeFile(outFile, jsonString, 'utf8');
-    console.log(`✅ Converted ${outFile} (${totalShows} shows)`);
-    return true;
   } catch (err) {
     console.log(`❌ Error processing ${url}: ${err.message}`);
-    return false;
+    return { success: false, type, dateOrMonth, error: err.message };
   }
 }
 
@@ -164,7 +185,7 @@ async function runWithConcurrency(tasks, concurrency) {
   // ----- Generate list of tasks -----
   const tasks = [];
 
-  // For each date, add boxoffice and advance tasks
+  // For each date, add boxoffice and advance tasks (skip if already exists)
   let current = START_DATE.clone();
   while (current.isBefore(END_DATE) || current.isSame(END_DATE, 'day')) {
     const dateStr = current.format('YYYY-MM-DD');
@@ -176,8 +197,7 @@ async function runWithConcurrency(tasks, concurrency) {
     if (!fs.existsSync(boxofficeOut)) {
       tasks.push(async () => {
         console.log(`⬇️ Downloading boxoffice ${dateStr}...`);
-        const ok = await downloadAndConvert(boxofficeUrl, boxofficeOut);
-        return { type: 'boxoffice', date: dateStr, success: ok };
+        return await downloadAndConvert(boxofficeUrl, boxofficeOut, 'boxoffice', dateStr);
       });
     } else {
       console.log(`⏭️ Boxoffice ${dateStr} already exists, skipping.`);
@@ -186,8 +206,7 @@ async function runWithConcurrency(tasks, concurrency) {
     if (!fs.existsSync(advanceOut)) {
       tasks.push(async () => {
         console.log(`⬇️ Downloading advance ${dateStr}...`);
-        const ok = await downloadAndConvert(advanceUrl, advanceOut);
-        return { type: 'advance', date: dateStr, success: ok };
+        return await downloadAndConvert(advanceUrl, advanceOut, 'advance', dateStr);
       });
     } else {
       console.log(`⏭️ Advance ${dateStr} already exists, skipping.`);
@@ -210,24 +229,7 @@ async function runWithConcurrency(tasks, concurrency) {
     if (!fs.existsSync(logOut)) {
       tasks.push(async () => {
         console.log(`⬇️ Downloading log ${month}...`);
-        try {
-          const resp = await fetch(logUrl);
-          if (resp.ok) {
-            const data = await resp.json();
-            // Logs are already compact? We'll keep them as-is, but can minify too.
-            // For consistency, we minify logs as well.
-            const logString = PRETTY ? JSON.stringify(data, null, 2) : JSON.stringify(data);
-            await fsPromises.writeFile(logOut, logString, 'utf8');
-            console.log(`✅ Log ${month} downloaded.`);
-            return { type: 'log', month, success: true };
-          } else {
-            console.log(`⚠️ Log ${month} not found (status ${resp.status})`);
-            return { type: 'log', month, success: false };
-          }
-        } catch (err) {
-          console.log(`❌ Error downloading log ${month}: ${err.message}`);
-          return { type: 'log', month, success: false };
-        }
+        return await downloadAndConvert(logUrl, logOut, 'log', month);
       });
     } else {
       console.log(`⏭️ Log ${month} already exists.`);
@@ -236,12 +238,24 @@ async function runWithConcurrency(tasks, concurrency) {
 
   console.log(`\n📦 Total tasks: ${tasks.length}`);
 
-  // ----- Run with concurrency (chunked) -----
+  // ----- Run with concurrency -----
   const results = await runWithConcurrency(tasks, CONCURRENCY);
 
   // ----- Summarize -----
-  const successCount = results.filter(r => r && r.success).length;
-  const failCount = results.length - successCount;
-  console.log(`\n✅ Migration complete. Success: ${successCount}, Fail: ${failCount}`);
-  process.exit(failCount === 0 ? 0 : 1);
+  // Separate data (boxoffice/advance) from logs; only data failures matter
+  const dataResults = results.filter(r => r && (r.type === 'boxoffice' || r.type === 'advance'));
+  const logResults = results.filter(r => r && r.type === 'log');
+
+  const dataSuccess = dataResults.filter(r => r.success).length;
+  const dataFail = dataResults.length - dataSuccess;
+
+  const logSuccess = logResults.filter(r => r.success).length;
+  const logFail = logResults.length - logSuccess;
+
+  console.log(`\n✅ Migration complete.`);
+  console.log(`   📊 Data (boxoffice/advance): Success ${dataSuccess}, Fail ${dataFail}`);
+  console.log(`   📋 Logs: Success ${logSuccess}, Fail ${logFail}`);
+
+  // Exit with error only if at least one data file failed
+  process.exit(dataFail === 0 ? 0 : 1);
 })();
