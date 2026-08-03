@@ -1,5 +1,5 @@
 // advance.js – Daily Advance (tomorrow)
-// Same architecture as dailybo.js, but fetches tomorrow's date and merges.
+// Output directory: ADVANCE_DIR (default ./advance)
 
 require('dotenv').config();
 const fs = require('fs');
@@ -19,15 +19,11 @@ const CONFIG = {
   RETRY_ATTEMPTS: 3,
   RETRY_DELAY: 1000,
   FETCH_CONCURRENCY: 10,
-  BASE_DIR: './districtdata2026',
-  ADVANCE_DIR: './districtdata2026/advance',
-  LOGS_DIR: './districtdata2026/logs',
+  ADVANCE_DIR: process.env.ADVANCE_DIR || './advance',
 };
 
 function ensureDirs() {
-  [CONFIG.BASE_DIR, CONFIG.ADVANCE_DIR, CONFIG.LOGS_DIR].forEach(dir => {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  });
+  if (!fs.existsSync(CONFIG.ADVANCE_DIR)) fs.mkdirSync(CONFIG.ADVANCE_DIR, { recursive: true });
 }
 ensureDirs();
 
@@ -88,7 +84,7 @@ function buildDictionaries(shows) {
     const audi = s.audi || ''; if (!dicts.audis[audi]) dicts.audis[audi] = nextId.audis++;
   });
 
-  return { forward: dicts, reverse: null }; // reverse not needed for compression
+  return { forward: dicts };
 }
 
 function compressShows(shows, dicts) {
@@ -104,7 +100,8 @@ function compressShows(shows, dicts) {
     const sold = s.sold || 0;
     const gross = Math.round(s.gross * 100);
     const occupancy = total ? Math.round((sold / total) * 10000) : 0;
-    return [cityId, stateId, venueId, chainId, timeId, audiId, total, avail, sold, gross, occupancy];
+    // No minsLeft for advance, but we keep 0 for uniformity
+    return [cityId, stateId, venueId, chainId, timeId, audiId, total, avail, sold, gross, occupancy, 0];
   });
 }
 
@@ -129,6 +126,7 @@ function decompressShow(arr, dicts) {
     sold: arr[8],
     gross: arr[9] / 100,
     occupancy: (arr[10] / 100).toFixed(2) + '%',
+    minsLeft: arr[11], // always 0
   };
 }
 
