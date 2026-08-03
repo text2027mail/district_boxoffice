@@ -1,0 +1,77 @@
+name: Historical Data Migration (fetchold.js)
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: 'Start date (YYYY-MM-DD) – defaults to 2025-08-01'
+        required: false
+        default: '2025-08-01'
+        type: string
+      end_date:
+        description: 'End date (YYYY-MM-DD) – defaults to today'
+        required: false
+        default: ''
+        type: string
+  # Optional: run on a schedule (e.g., daily at 02:00) to catch up
+  # schedule:
+  #   - cron: '0 2 * * *'
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    env:
+      PRIVATE_REPO: "your-username/PVTDistrictRepo2026"   # CHANGE THIS
+      PRIVATE_BRANCH: "main"
+      PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+
+    steps:
+      # 1. Checkout public repository (contains the scripts)
+      - name: Checkout public repo (code)
+        uses: actions/checkout@v3
+        with:
+          path: code
+
+      # 2. Clone private data repository using PAT
+      - name: Clone private data repo using PAT
+        run: |
+          git clone https://x-access-token:${PAT}@github.com/${PRIVATE_REPO} data
+        working-directory: .
+
+      # 3. Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      # 4. Install dependencies
+      - name: Install dependencies
+        run: |
+          cd code
+          npm install
+
+      # 5. Run the migration script (fetchold.js)
+      #    It will download boxoffice, advance, and logs from the old public repo
+      #    and convert them to the new compressed format.
+      - name: Run fetchold.js
+        env:
+          BOXOFFICE_DIR: ${{ github.workspace }}/data/boxoffice
+          ADVANCE_DIR: ${{ github.workspace }}/data/advance
+          LOGS_DIR: ${{ github.workspace }}/data/logs
+          # Override start/end dates if provided as inputs (the script reads dayjs by default)
+          # We can pass them as environment variables, but fetchold.js doesn't currently support
+          # custom date ranges – it uses hardcoded start (2025-08-01) and today.
+          # If you need custom ranges, you can modify fetchold.js to read these env vars.
+        run: |
+          cd code
+          node fetchold.js
+
+      # 6. Commit and push changes to private repo
+      - name: Commit and push changes to private repo
+        run: |
+          cd data
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add boxoffice/ advance/ logs/
+          git diff --staged --quiet || git commit -m "Historical data migration via fetchold.js"
+          git push origin ${PRIVATE_BRANCH}
