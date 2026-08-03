@@ -79,19 +79,21 @@ function compressShows(shows, dicts) {
 // ------------------------- ASYNC DOWNLOAD AND CONVERT -------------------------
 /**
  * Downloads a JSON file from `url`, compresses it, and writes to `outFile`.
- * Returns an object: { success: boolean, type: 'boxoffice'|'advance'|'log', dateOrMonth: string, statusCode?: number }
+ * Returns an object:
+ *   { success: boolean, type, dateOrMonth, status?: 'not_found' | 'ok' | 'error' }
  */
 async function downloadAndConvert(url, outFile, type, dateOrMonth) {
   try {
     const resp = await fetch(url);
     if (!resp.ok) {
-      // For logs, 404 is a warning, not an error
-      if (type === 'log' && resp.status === 404) {
-        console.log(`ℹ️ Log ${dateOrMonth} not found (status 404) – skipping`);
-        return { success: true, type, dateOrMonth, statusCode: 404 }; // treat as success (no failure)
+      // 404 – file does not exist – treat as a warning, not a failure
+      if (resp.status === 404) {
+        console.log(`ℹ️ ${type} ${dateOrMonth} not found (status 404) – skipping`);
+        return { success: true, type, dateOrMonth, status: 'not_found' };
       }
+      // Other HTTP errors (500, 403, etc.) – real failure
       console.log(`⚠️ Failed to fetch ${url} (status ${resp.status})`);
-      return { success: false, type, dateOrMonth, statusCode: resp.status };
+      return { success: false, type, dateOrMonth, status: 'http_error', statusCode: resp.status };
     }
 
     const data = await resp.json();
@@ -122,8 +124,9 @@ async function downloadAndConvert(url, outFile, type, dateOrMonth) {
       }
 
       if (totalShows === 0) {
-        console.log(`⏭️ No shows found in ${url}`);
-        return { success: false, type, dateOrMonth, reason: 'No shows' };
+        console.log(`⏭️ No shows found in ${url} – skipping`);
+        // This is unusual but we treat as success (file downloaded, but empty)
+        return { success: true, type, dateOrMonth, status: 'empty' };
       }
 
       const allShows = Object.values(movies).flat();
@@ -143,19 +146,18 @@ async function downloadAndConvert(url, outFile, type, dateOrMonth) {
       const jsonString = PRETTY ? JSON.stringify(output, null, 2) : JSON.stringify(output);
       await fsPromises.writeFile(outFile, jsonString, 'utf8');
       console.log(`✅ Converted ${outFile} (${totalShows} shows)`);
-      return { success: true, type, dateOrMonth };
+      return { success: true, type, dateOrMonth, status: 'ok' };
     }
 
     // --- For logs ---
-    // Logs are already in the desired format; we just write them as-is (optionally minified)
     const logString = PRETTY ? JSON.stringify(data, null, 2) : JSON.stringify(data);
     await fsPromises.writeFile(outFile, logString, 'utf8');
     console.log(`✅ Log ${dateOrMonth} downloaded.`);
-    return { success: true, type, dateOrMonth };
+    return { success: true, type, dateOrMonth, status: 'ok' };
 
   } catch (err) {
     console.log(`❌ Error processing ${url}: ${err.message}`);
-    return { success: false, type, dateOrMonth, error: err.message };
+    return { success: false, type, dateOrMonth, status: 'exception', error: err.message };
   }
 }
 
@@ -242,20 +244,28 @@ async function runWithConcurrency(tasks, concurrency) {
   const results = await runWithConcurrency(tasks, CONCURRENCY);
 
   // ----- Summarize -----
-  // Separate data (boxoffice/advance) from logs; only data failures matter
   const dataResults = results.filter(r => r && (r.type === 'boxoffice' || r.type === 'advance'));
   const logResults = results.filter(r => r && r.type === 'log');
 
+  // Count successes, not-found (skipped), and real failures
   const dataSuccess = dataResults.filter(r => r.success).length;
-  const dataFail = dataResults.length - dataSuccess;
+  const dataNotFound = dataResults.filter(r => r.status === 'not_found').length;
+  const dataFail = dataResults.filter(r => !r.success).length;
 
   const logSuccess = logResults.filter(r => r.success).length;
-  const logFail = logResults.length - logSuccess;
+  const logNotFound = logResults.filter(r => r.status === 'not_found').length;
+  const logFail = logResults.filter(r => !r.success).length;
 
   console.log(`\n✅ Migration complete.`);
-  console.log(`   📊 Data (boxoffice/advance): Success ${dataSuccess}, Fail ${dataFail}`);
-  console.log(`   📋 Logs: Success ${logSuccess}, Fail ${logFail}`);
+  console.log(`   📊 Data (boxoffice/advance):`);
+  console.log(`       Success (downloaded) : ${dataSuccess - dataNotFound}`);
+  console.log(`       Skipped (404)        : ${dataNotFound}`);
+  console.log(`       Failures (real error): ${dataFail}`);
+  console.log(`   📋 Logs:`);
+  console.log(`       Success (downloaded) : ${logSuccess - logNotFound}`);
+  console.log(`       Skipped (404)        : ${logNotFound}`);
+  console.log(`       Failures (real error): ${logFail}`);
 
-  // Exit with error only if at least one data file failed
+  // Exit with error only if there is at least one real failure (non-404) for data files
   process.exit(dataFail === 0 ? 0 : 1);
 })();
