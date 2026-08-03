@@ -1,0 +1,19 @@
+{
+  "name": "district-tracking-compressed",
+  "version": "1.0.0",
+  "description": "Enterprise-grade district tracking with compression",
+  "main": "dailybo.js",
+  "scripts": {
+    "boxoffice": "node dailybo.js",
+    "advance": "node advance.js",
+    "migrate": "node fetchold.js"
+  },
+  "dependencies": {
+    "dayjs": "^1.11.10",
+    "dotenv": "^16.3.1",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {},
+  "author": "",
+  "license": "ISC"
+}
