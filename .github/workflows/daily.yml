@@ -2,7 +2,7 @@ name: Daily Boxoffice
 
 on:
   schedule:
-    - cron: '0 */1 * * *'   # every 2 hours
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 jobs:
