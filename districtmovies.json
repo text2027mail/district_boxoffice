@@ -294,7 +294,7 @@
     "runtime": 134,
     "rating": "A",
     "poster": "https://cdn.district.in/movies-assets/images/cinema/THE-END-OF-OAK-STREET-f53f28d0-8fd1-11f1-98a8-65a4b6994ecd.jpg",
-    "city": "Bangalore, Guntur, Chandigarh, Hyderabad, Kochi, Kolkata, Mangaluru, Mumbai, Nashik, Goa, Visakhapatnam, Bhubaneswar",
+    "city": "Bangalore, Chandigarh, Hyderabad, Kochi, Kolkata, Mangaluru, Mumbai, Nashik, Nagpur, Goa, Visakhapatnam, Bhubaneswar",
     "cityCount": 12
   },
   {
@@ -317,6 +317,17 @@
     "rating": "U",
     "poster": "https://cdn.district.in/movies-assets/images/cinema/IND-v-SA_Poster-14905f80-0eed-11f1-aacc-87dee4fe5c6c.jpg",
     "city": "Ahmedabad, Bhubaneswar, Chandigarh, Delhi/NCR, Gandhinagar, Jaipur, Kolkata, Mumbai, Nashik, Patna, Surat",
+    "cityCount": 11
+  },
+  {
+    "movie": "Khalifa",
+    "language": "Malayalam",
+    "movieCode": "jdkWFjg8AJ",
+    "id": 157430,
+    "runtime": 134,
+    "rating": "UA16+",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/Khalifa_Poster-a957fba0-aa70-11f0-89d8-39ca3fe79c6b.jpg",
+    "city": "Bangalore, Bhopal, Chandigarh, Coimbatore, Delhi/NCR, Kochi, Mumbai, Surat, Chennai, Nagpur, Madurai",
     "cityCount": 11
   },
   {
@@ -386,17 +397,6 @@
     "cityCount": 10
   },
   {
-    "movie": "The End of Oak Street",
-    "language": "Hindi",
-    "movieCode": "dbRmUdUozcn",
-    "id": 216978,
-    "runtime": 134,
-    "rating": "A",
-    "poster": "https://cdn.district.in/movies-assets/images/cinema/THE-END-OF-OAK-STREET-f53f28d0-8fd1-11f1-98a8-65a4b6994ecd.jpg",
-    "city": "Ahmedabad, Amritsar, Bhopal, Delhi/NCR, Jaipur, Kota, Patna, Surat, Nagpur, Gandhinagar",
-    "cityCount": 10
-  },
-  {
     "movie": "Thudakkam",
     "language": "Malayalam",
     "movieCode": "2UZm6KMeD_",
@@ -406,6 +406,17 @@
     "poster": "https://cdn.district.in/movies-assets/images/cinema/_Poster%20(31)-2a2d0240-7b57-11f1-99a0-2b8e62c247c3.jpg",
     "city": "Bangalore, Bhopal, Delhi/NCR, Hyderabad, Kochi, Mangaluru, Mumbai, Surat, Chennai, Goa",
     "cityCount": 10
+  },
+  {
+    "movie": "Insidious: Out of the Further",
+    "language": "English",
+    "movieCode": "uNfj2asEgW",
+    "id": 175738,
+    "runtime": 134,
+    "rating": "A",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/Insidious--6b2529d0-37d7-11f1-840e-63804c65ce25.jpg",
+    "city": "Bangalore, Amritsar, Chandigarh, Delhi/NCR, Hyderabad, Kochi, Kolkata, Mumbai, Bhubaneswar",
+    "cityCount": 9
   },
   {
     "movie": "Maharani",
@@ -427,6 +438,17 @@
     "rating": "UA13+",
     "poster": "https://cdn.district.in/movies-assets/images/cinema/2_Poster%20(7)-7de88560-8b49-11f1-a0bf-b3d1a88b4bbe.jpg",
     "city": "Ahmedabad, Bangalore, Delhi/NCR, Hyderabad, Jaipur, Kolkata, Mumbai, Surat, Gandhinagar",
+    "cityCount": 9
+  },
+  {
+    "movie": "The End of Oak Street",
+    "language": "Hindi",
+    "movieCode": "dbRmUdUozcn",
+    "id": 216978,
+    "runtime": 134,
+    "rating": "A",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/THE-END-OF-OAK-STREET-f53f28d0-8fd1-11f1-98a8-65a4b6994ecd.jpg",
+    "city": "Ahmedabad, Amritsar, Bhopal, Delhi/NCR, Jaipur, Kota, Patna, Surat, Gandhinagar",
     "cityCount": 9
   },
   {
@@ -661,17 +683,6 @@
     "cityCount": 6
   },
   {
-    "movie": "Magudam",
-    "language": "Tamil",
-    "movieCode": "jHOtCOQ0fJ",
-    "id": 205140,
-    "runtime": 134,
-    "rating": "UA16+",
-    "poster": "https://cdn.district.in/movies-assets/images/cinema/_Poster-28694fc0-92f1-11f1-a5e1-bd3158f64877.jpg",
-    "city": "Bangalore, Coimbatore, Kochi, Mangaluru, Chennai, Madurai",
-    "cityCount": 6
-  },
-  {
     "movie": "Passengers",
     "language": "English",
     "movieCode": "zzRlhEk43amP",
@@ -881,6 +892,17 @@
     "cityCount": 5
   },
   {
+    "movie": "Insidious: Out of the Further",
+    "language": "Hindi",
+    "movieCode": "rDsWUl9NwM",
+    "id": 175738,
+    "runtime": 134,
+    "rating": "A",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/Insidious--6b2529d0-37d7-11f1-840e-63804c65ce25.jpg",
+    "city": "Ahmedabad, Bhopal, Jaipur, Patna, Gandhinagar",
+    "cityCount": 5
+  },
+  {
     "movie": "Kanchana",
     "language": "Telugu",
     "movieCode": "MerF23XLFb",
@@ -900,6 +922,17 @@
     "rating": "UA16+",
     "poster": "https://cdn.district.in/movies-assets/images/cinema/_Poster-fcf814b0-90d0-11f1-8f43-e185e93549d4.jpg",
     "city": "Bangalore, Guntur, Hyderabad, Chennai, Visakhapatnam",
+    "cityCount": 5
+  },
+  {
+    "movie": "Mahashivratri 2026: A Night with the Divine (Live Screening)",
+    "language": "Hindi",
+    "movieCode": "Jl31AXBPH_",
+    "id": 214404,
+    "runtime": 134,
+    "rating": "U",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/Mahashivratri-2026_Poster-2ff98160-00d9-11f1-93f9-5b9fffeb84b0.jpg",
+    "city": "Bangalore, Bengaluru, Delhi/NCR, Kochi, Mumbai",
     "cityCount": 5
   },
   {
@@ -991,6 +1024,17 @@
     "cityCount": 3
   },
   {
+    "movie": "Magudam",
+    "language": "Tamil",
+    "movieCode": "jHOtCOQ0fJ",
+    "id": 205140,
+    "runtime": 134,
+    "rating": "UA16+",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/_Poster-28694fc0-92f1-11f1-a5e1-bd3158f64877.jpg",
+    "city": "Bangalore, Coimbatore, Chennai",
+    "cityCount": 3
+  },
+  {
     "movie": "Makutam",
     "language": "Telugu",
     "movieCode": "a2pffr7sjc5",
@@ -999,17 +1043,6 @@
     "rating": "UA16+",
     "poster": "https://b.zmtcdn.com/data/edition_assets/17812376384893327.jpg",
     "city": "Guntur, Hyderabad, Visakhapatnam",
-    "cityCount": 3
-  },
-  {
-    "movie": "The End of Oak Street",
-    "language": "Tamil",
-    "movieCode": "pwV2iZ850IQ",
-    "id": 216978,
-    "runtime": 134,
-    "rating": "A",
-    "poster": "https://cdn.district.in/movies-assets/images/cinema/THE-END-OF-OAK-STREET-f53f28d0-8fd1-11f1-98a8-65a4b6994ecd.jpg",
-    "city": "Coimbatore, Chennai, Madurai",
     "cityCount": 3
   },
   {
@@ -1024,6 +1057,17 @@
     "cityCount": 3
   },
   {
+    "movie": "The End of Oak Street",
+    "language": "Tamil",
+    "movieCode": "pwV2iZ850IQ",
+    "id": 216978,
+    "runtime": 134,
+    "rating": "A",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/THE-END-OF-OAK-STREET-f53f28d0-8fd1-11f1-98a8-65a4b6994ecd.jpg",
+    "city": "Coimbatore, Chennai",
+    "cityCount": 2
+  },
+  {
     "movie": "Pallaburusu",
     "language": "Telugu",
     "movieCode": "qnkeg9v3tuj",
@@ -1031,8 +1075,8 @@
     "runtime": 134,
     "rating": "UA13+",
     "poster": "https://cdn.district.in/movies-assets/images/cinema/Pallaburuse-0d9c80d0-9252-11f1-9664-0f66be5c82cd.jpg",
-    "city": "Bangalore, Hyderabad",
-    "cityCount": 2
+    "city": "Hyderabad",
+    "cityCount": 1
   },
   {
     "movie": "The Odyssey",
@@ -1274,17 +1318,6 @@
     "rating": "A",
     "poster": "https://cdn.district.in/movies-assets/images/cinema/coolie-the-power-house-c0dde860-7466-11f0-9b57-a9dda541a3eb.jpg",
     "city": "Ahmedabad, Bangalore, Bengaluru, Bhopal, Bhubaneswar, Chandigarh, Delhi/NCR, Gandhinagar, Goa, Hyderabad, Jaipur, Kolkata, Kota, Mumbai, Nagpur, Nashik, Patna, Surat"
-  },
-  {
-    "movie": "Mahashivratri 2026: A Night with the Divine (Live Screening)",
-    "language": "Hindi",
-    "movieCode": "Jl31AXBPH_",
-    "id": 214404,
-    "runtime": 134,
-    "rating": "U",
-    "poster": "https://cdn.district.in/movies-assets/images/cinema/Mahashivratri-2026_Poster-2ff98160-00d9-11f1-93f9-5b9fffeb84b0.jpg",
-    "city": "Bangalore, Bengaluru, Delhi/NCR, Kochi, Mumbai",
-    "cityCount": 5
   },
   {
     "movie": "Marty Supreme",
@@ -2223,13 +2256,13 @@
   },
   {
     "movie": "Khalifa",
-    "language": "Malayalam",
-    "movieCode": "jdkWFjg8AJ",
+    "language": "Telugu",
+    "movieCode": "phqzpssclx9",
     "id": 157430,
     "runtime": 134,
     "rating": "UA16+",
     "poster": "https://cdn.district.in/movies-assets/images/cinema/Khalifa_Poster-a957fba0-aa70-11f0-89d8-39ca3fe79c6b.jpg",
-    "city": "Bangalore, Hyderabad, Kochi",
+    "city": "Guntur, Hyderabad, Visakhapatnam",
     "cityCount": 3
   },
   {
@@ -2384,6 +2417,17 @@
     "rating": "UA13+",
     "poster": "https://cdn.district.in/movies-assets/images/cinema/2%20(3)%20(1)-372613c0-eb87-11f0-ad2d-1bbc61323e3a.jpg",
     "city": "Chennai, Delhi/NCR, Surat",
+    "cityCount": 3
+  },
+  {
+    "movie": "Panchali Panchabhartruka",
+    "language": "Telugu",
+    "movieCode": "om9vbt05lma",
+    "id": 229841,
+    "runtime": 134,
+    "rating": "A",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/Panchali-Panchabhartruka-poster-543c6ba0-9008-11f1-b009-5bae0e7bd75c.jpg",
+    "city": "Guntur, Hyderabad, Visakhapatnam",
     "cityCount": 3
   },
   {
@@ -4794,6 +4838,17 @@
     "cityCount": 2
   },
   {
+    "movie": "Irumudi",
+    "language": "Telugu",
+    "movieCode": "B0mELTRUw2",
+    "id": 214275,
+    "runtime": 134,
+    "rating": "UA16+",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/Irumudi-5b6bf330-5f36-11f1-89d2-b36746ab91e1.jpg",
+    "city": "Bangalore, Chennai",
+    "cityCount": 2
+  },
+  {
     "movie": "J-hope Tour : Hope On Stage - The Movie",
     "language": "Korean",
     "movieCode": "a7mvW4~bcB",
@@ -6290,6 +6345,17 @@
     "cityCount": 2
   },
   {
+    "movie": "Muta Mestri",
+    "language": "Telugu",
+    "movieCode": "hhr0imou1ag",
+    "id": 230947,
+    "runtime": 134,
+    "rating": "U",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/Muta-Mestri-(1)-1e598980-96fe-11f1-9511-b94b91d711e0.jpg",
+    "city": "Guntur, Hyderabad",
+    "cityCount": 2
+  },
+  {
     "movie": "Muthu",
     "language": "Tamil",
     "movieCode": "~diY2GVNl",
@@ -6760,17 +6826,6 @@
     "rating": "U",
     "poster": "https://cdn.district.in/movies-assets/images/cinema/Pancha-Ratnagalu-4a87dd50-1859-11f1-a857-fd0378823a8e.jpg",
     "city": "Bangalore, Bengaluru",
-    "cityCount": 2
-  },
-  {
-    "movie": "Panchali Panchabhartruka",
-    "language": "Telugu",
-    "movieCode": "om9vbt05lma",
-    "id": 229841,
-    "runtime": 134,
-    "rating": "A",
-    "poster": "https://cdn.district.in/movies-assets/images/cinema/Panchali-Panchabhartruka-poster-543c6ba0-9008-11f1-b009-5bae0e7bd75c.jpg",
-    "city": "Guntur, Hyderabad",
     "cityCount": 2
   },
   {
@@ -8454,17 +8509,6 @@
     "rating": "A",
     "poster": "https://cdn.district.in/movies-assets/images/cinema/The-Running-Man_1080x1920_1-2cbc65c0-be54-11f0-98da-cd263d836af8.jpg",
     "city": "Bangalore, Bengaluru",
-    "cityCount": 2
-  },
-  {
-    "movie": "The Sheep Detectives",
-    "language": "English",
-    "movieCode": "5GeFvbqY0r",
-    "id": 212070,
-    "runtime": 134,
-    "rating": "UA7+",
-    "poster": "https://cdn.district.in/movies-assets/images/cinema/The-Sheep-Detectives--poster-ec2b02f0-ddbb-11f0-8916-d54d0954c21a.jpg",
-    "city": "Delhi/NCR, Hyderabad",
     "cityCount": 2
   },
   {
@@ -11207,6 +11251,17 @@
     "cityCount": 1
   },
   {
+    "movie": "Bethlehem Kudumba Unit",
+    "language": "Malayalam",
+    "movieCode": "HBLon2yt5F",
+    "id": 226245,
+    "runtime": 134,
+    "rating": "UA13+",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/Bethlehem-Kudumba-Unit-3c611200-6ed5-11f1-9444-c504df2f3dc4.jpg",
+    "city": "Kochi",
+    "cityCount": 1
+  },
+  {
     "movie": "Bha. Bha. Ba.",
     "language": "Malayalam",
     "movieCode": "9uKOV7GJf8",
@@ -12027,7 +12082,7 @@
     "id": 144007,
     "runtime": 134,
     "rating": "U",
-    "poster": "https://cdn.district.in/movies-assets/images/cinema/Chaal-Jeevi-Laiye-app-poster-2-4353f31f-3c50-46a4-a32b-a0342bc62323.jpg",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/Chaal-Jeevi-Laiye--edca1f30-1b77-11f0-b2bf-d9c854ed10fa.jpg",
     "city": "Surat",
     "cityCount": 1
   },
@@ -14974,7 +15029,7 @@
     "id": 207554,
     "runtime": 134,
     "rating": "UA13+",
-    "poster": "https://cdn.district.in/movies-assets/images/cinema/Greenland-2_Poster-83a2d130-e3ca-11f0-8de4-816c71c00871-367de580-eb8a-11f0-9e03-11f4b093e305.jpg",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/Greenland-2_Poster-83a2d130-e3ca-11f0-8de4-816c71c00871.jpg",
     "city": "Delhi/NCR",
     "cityCount": 1
   },
@@ -15856,6 +15911,17 @@
     "rating": "U",
     "poster": "https://cdn.district.in/movies-assets/images/cinema/insideout2-d7b35e40-fb1b-11ef-8434-f9ed39b3241b.jpg",
     "city": "Bangalore",
+    "cityCount": 1
+  },
+  {
+    "movie": "Insidious: Out of the Further",
+    "language": "Telugu",
+    "movieCode": "sGCO8xHLGuC",
+    "id": 175738,
+    "runtime": 134,
+    "rating": "A",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/Insidious--6b2529d0-37d7-11f1-840e-63804c65ce25.jpg",
+    "city": "Guntur",
     "cityCount": 1
   },
   {
@@ -25426,6 +25492,17 @@
     "rating": "A",
     "poster": "https://cdn.district.in/movies-assets/images/cinema/secret-b42de1f0-00c1-11f1-9364-57ed19eb2585-788ee130-028d-11f1-bb0b-11436971d59b.jpg",
     "city": "Mumbai",
+    "cityCount": 1
+  },
+  {
+    "movie": "The Sheep Detectives",
+    "language": "English",
+    "movieCode": "5GeFvbqY0r",
+    "id": 212070,
+    "runtime": 134,
+    "rating": "UA7+",
+    "poster": "https://cdn.district.in/movies-assets/images/cinema/The-Sheep-Detectives--poster-ec2b02f0-ddbb-11f0-8916-d54d0954c21a.jpg",
+    "city": "Hyderabad",
     "cityCount": 1
   },
   {
