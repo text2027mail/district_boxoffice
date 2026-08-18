@@ -1,0 +1,38 @@
+name: Daily Movies Json Auto Tracker
+
+on:
+  schedule:
+    - cron: "30 */4 * * *"   # every 4 hours at 30 min (UTC)
+  workflow_dispatch:         # Manual trigger if needed
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: 📦 Install dependencies
+        run: npm install --omit=dev
+
+      - name: 🚀 Run District Movies Json Tracker
+        run: |
+          set -e
+          node dailymovies.js
+
+      - name: 💾 Commit & Push JSON
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "Auto Tracker Bot"
+          git add districtmovies.json
+          git commit -m "Auto update: $(date '+%Y-%m-%d %H:%M')" || echo "No changes"
+          git pull --rebase --autostash || echo "Pull failed"
+          git push || echo "Nothing to push"
