@@ -1,0 +1,37 @@
+name: Update Movie List
+
+# Trigger every day at 6 AM IST (01:30 UTC)
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 3 hours, at minute 0
+  workflow_dispatch:  # allows manual trigger
+
+jobs:
+  update-movielist:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+
+    - name: Run movie list script
+      run: |
+        python movielist.py --out movielist.json
+
+    - name: Commit and push changes
+      run: |
+        git config --local user.name "github-actions[bot]"
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git add movielist.json
+        git diff --cached --quiet || git commit -m "Auto-update movielist.json [skip ci]"
+        git push
