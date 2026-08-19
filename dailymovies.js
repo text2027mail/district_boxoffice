@@ -4,92 +4,132 @@ const fetch = require("node-fetch");
 const OUTPUT_FILE = "districtmovies.json";
 const BACKUP_FILE = `backup_districtmovies_${Date.now()}.json`;
 
-// Firecrawl configuration (use the provided token)
+// Firecrawl configuration
 const FIRECRAWL_URL = "https://api.firecrawl.dev/v2/scrape";
 const FIRECRAWL_TOKEN = "fc-51a30586f6b44777a717092ff6eea2a4";
 const TARGET_URL = "https://paytmmovies.text2024mail.workers.dev/";
 
-// Parse city string into unique sorted array
+/**
+ * Parse city string into unique sorted array.
+ * Used only for sorting, not stored in final output.
+ */
 function parseCities(cityString) {
   if (!cityString) return [];
-  const cities = cityString
-    .split(",")
-    .map(c => c.trim())
-    .filter(Boolean);
-  return [...new Set(cities)]; // remove duplicates
+  return [...new Set(
+    cityString.split(",").map(c => c.trim()).filter(Boolean)
+  )].sort();
 }
 
-// Load existing data if available
+/**
+ * Load existing compact JSON and convert to internal object format.
+ * Expected compact entry: [id, movie, aliases, language, movieCode, runtime, rating, poster]
+ */
 function loadExistingData() {
-  if (fs.existsSync(OUTPUT_FILE)) {
-    try {
-      return JSON.parse(fs.readFileSync(OUTPUT_FILE, "utf-8"));
-    } catch (err) {
-      console.error("⚠️ Error reading existing file, starting fresh:", err);
+  if (!fs.existsSync(OUTPUT_FILE)) return [];
+
+  try {
+    const raw = fs.readFileSync(OUTPUT_FILE, "utf-8");
+    const data = JSON.parse(raw);
+
+    if (!Array.isArray(data)) {
+      console.warn("⚠️ Existing file is not an array, starting fresh.");
       return [];
     }
+
+    return data.map(entry => {
+      if (Array.isArray(entry) && entry.length >= 8) {
+        return {
+          id: entry[0],
+          movie: entry[1],
+          aliases: entry[2] || entry[1],
+          language: entry[3],
+          movieCode: entry[4] || "",
+          runtime: entry[5],
+          rating: entry[6],
+          poster: entry[7],
+          city: "",           // city not stored in compact format
+          cityCount: 0        // will be recalculated for sorting if needed
+        };
+      }
+      // Fallback for object format (should not happen after first run)
+      return entry;
+    });
+  } catch (err) {
+    console.error("⚠️ Error reading existing file:", err.message);
+    return [];
   }
-  return [];
 }
 
-// Merge new movies into existing dataset with strict uniqueness
+/**
+ * Merge fresh movies into existing dataset.
+ * Uniqueness key: id + language.
+ */
 function mergeMovies(existing, fresh) {
   const map = new Map();
 
-  // index existing by id+language
+  // Index existing by id+language
   existing.forEach(movie => {
     const key = `${movie.id}_${movie.language}`;
     map.set(key, movie);
   });
 
-  // update/add fresh
+  // Process fresh movies
   fresh.forEach(movie => {
     const key = `${movie.id}_${movie.language}`;
 
+    // Compute city count for sorting (but we won't store it)
+    const cities = parseCities(movie.city);
+    movie.cityCount = cities.length;   // temporary, will be removed before saving
+
     if (map.has(key)) {
-      // check if same movie name → update
-      if (map.get(key).movie === movie.movie) {
-        const cities = parseCities(movie.city);
-        map.set(key, {
-          ...movie,
-          city: cities.join(", "),
-          cityCount: cities.length
-        });
+      const existingMovie = map.get(key);
+      // If same movie name, update with fresh (latest data)
+      if (existingMovie.movie === movie.movie) {
+        map.set(key, movie);
       } else {
-        // different movie name for same id+language → ignore
         console.warn(
           `⚠️ Skipped conflicting entry: id=${movie.id}, lang=${movie.language}, name=${movie.movie}`
         );
       }
     } else {
-      // new entry → add
-      const cities = parseCities(movie.city);
-      map.set(key, {
-        ...movie,
-        city: cities.join(", "),
-        cityCount: cities.length
-      });
+      map.set(key, movie);
     }
   });
 
   return Array.from(map.values());
 }
 
-// Sort by city count (desc), then movie name (asc)
+/**
+ * Sort movies by cityCount desc, then movie name asc.
+ */
 function sortMovies(movies) {
   return movies.sort((a, b) => {
-    if (b.cityCount !== a.cityCount) {
-      return b.cityCount - a.cityCount;
-    }
-    return a.movie.localeCompare(b.movie);
+    const countA = a.cityCount || 0;
+    const countB = b.cityCount || 0;
+    if (countB !== countA) return countB - countA;
+    return (a.movie || "").localeCompare(b.movie || "");
   });
 }
 
 /**
- * Fetch data using Firecrawl as a proxy.
- * Firecrawl returns the page content as markdown. We expect the target URL
- * to return plain JSON, so the markdown will either be the raw JSON string
- * or a code block containing it. This function extracts and parses the JSON.
+ * Convert internal movie objects to compact array format.
+ * Removes city, cityCount, and any extra fields.
+ */
+function toCompactFormat(movies) {
+  return movies.map(movie => [
+    movie.id,
+    movie.movie,
+    movie.aliases || movie.movie,     // fallback to movie name
+    movie.language,
+    movie.movieCode || "",
+    movie.runtime,
+    movie.rating,
+    movie.poster
+  ]);
+}
+
+/**
+ * Fetch data via Firecrawl proxy and extract JSON.
  */
 async function fetchDataFromFirecrawl() {
   const options = {
@@ -118,17 +158,16 @@ async function fetchDataFromFirecrawl() {
     throw new Error(`Firecrawl returned error: ${result.error || "Unknown error"}`);
   }
 
-  // Extract markdown content
   const markdown = result.data?.markdown || "";
   if (!markdown) {
     throw new Error("No markdown content returned from Firecrawl");
   }
 
-  // Try to parse the markdown as JSON directly (if it's plain text)
+  // Try to parse markdown as raw JSON
   try {
     return JSON.parse(markdown);
   } catch {
-    // If that fails, attempt to extract JSON from a markdown code block
+    // Attempt to extract JSON from a code block
     const codeBlockMatch = markdown.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (codeBlockMatch && codeBlockMatch[1]) {
       try {
@@ -143,28 +182,37 @@ async function fetchDataFromFirecrawl() {
 
 async function main() {
   try {
-    // Get fresh data via Firecrawl
+    // 1. Fetch fresh data
     const freshData = await fetchDataFromFirecrawl();
+    console.log(`📥 Fresh movies received: ${freshData.length}`);
 
+    // 2. Load existing data
     console.log("📂 Loading existing movies...");
     const existingData = loadExistingData();
+    console.log(`   Existing movies: ${existingData.length}`);
 
+    // 3. Merge
     console.log("🔄 Merging movies...");
     let merged = mergeMovies(existingData, freshData);
 
+    // 4. Sort
     console.log("📊 Sorting movies...");
     merged = sortMovies(merged);
 
-    // Backup old file
+    // 5. Backup old file
     if (fs.existsSync(OUTPUT_FILE)) {
       fs.copyFileSync(OUTPUT_FILE, BACKUP_FILE);
       console.log(`📦 Backup saved as ${BACKUP_FILE}`);
     }
 
-    console.log("💾 Saving to", OUTPUT_FILE);
-    fs.writeFileSync(OUTPUT_FILE, JSON.stringify(merged, null, 2), "utf-8");
+    // 6. Convert to compact format (drop city/cityCount)
+    const compact = toCompactFormat(merged);
 
-    console.log("✅ Done! Total movies:", merged.length);
+    // 7. Save minified one-line JSON
+    console.log(`💾 Saving to ${OUTPUT_FILE}`);
+    fs.writeFileSync(OUTPUT_FILE, JSON.stringify(compact, null, 0), "utf-8");
+
+    console.log(`✅ Done! Total movies saved: ${compact.length}`);
   } catch (err) {
     console.error("❌ Error:", err.message);
   }
