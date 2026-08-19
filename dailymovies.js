@@ -22,7 +22,9 @@ function parseCities(cityString) {
 
 /**
  * Load existing compact JSON and convert to internal object format.
- * Expected compact entry: [id, movie, aliases, language, movieCode, runtime, rating, poster]
+ * Expected compact entry (new version):
+ * [id, movie, aliases, language, movieCode, runtime, rating, poster, cityCount]
+ * Supports old 8‑element format as well.
  */
 function loadExistingData() {
   if (!fs.existsSync(OUTPUT_FILE)) return [];
@@ -38,6 +40,7 @@ function loadExistingData() {
 
     return data.map(entry => {
       if (Array.isArray(entry) && entry.length >= 8) {
+        const cityCount = entry.length >= 9 ? (entry[8] || 0) : 0;
         return {
           id: entry[0],
           movie: entry[1],
@@ -47,8 +50,8 @@ function loadExistingData() {
           runtime: entry[5],
           rating: entry[6],
           poster: entry[7],
-          city: "",           // city not stored in compact format
-          cityCount: 0        // will be recalculated for sorting if needed
+          city: "",                // city name not stored
+          cityCount: cityCount     // restored from compact
         };
       }
       // Fallback for object format (should not happen after first run)
@@ -77,9 +80,9 @@ function mergeMovies(existing, fresh) {
   fresh.forEach(movie => {
     const key = `${movie.id}_${movie.language}`;
 
-    // Compute city count for sorting (but we won't store it)
+    // Compute city count for sorting (stored in final output)
     const cities = parseCities(movie.city);
-    movie.cityCount = cities.length;   // temporary, will be removed before saving
+    movie.cityCount = cities.length;
 
     if (map.has(key)) {
       const existingMovie = map.get(key);
@@ -113,18 +116,19 @@ function sortMovies(movies) {
 
 /**
  * Convert internal movie objects to compact array format.
- * Removes city, cityCount, and any extra fields.
+ * Includes cityCount but NOT the city string.
  */
 function toCompactFormat(movies) {
   return movies.map(movie => [
     movie.id,
     movie.movie,
-    movie.aliases || movie.movie,     // fallback to movie name
+    movie.aliases || movie.movie,
     movie.language,
     movie.movieCode || "",
     movie.runtime,
     movie.rating,
-    movie.poster
+    movie.poster,
+    movie.cityCount || 0   // ← cityCount kept, city name removed
   ]);
 }
 
@@ -205,7 +209,7 @@ async function main() {
       console.log(`📦 Backup saved as ${BACKUP_FILE}`);
     }
 
-    // 6. Convert to compact format (drop city/cityCount)
+    // 6. Convert to compact format (drop city, keep cityCount)
     const compact = toCompactFormat(merged);
 
     // 7. Save minified one-line JSON
