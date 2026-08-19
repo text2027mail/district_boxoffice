@@ -90,7 +90,7 @@ def parse_movie_key(key):
     return key, "Unknown"
 
 # =====================================================
-# LOAD EXISTING MOVIELIST
+# LOAD EXISTING MOVIELIST (supports old & compact formats)
 # =====================================================
 
 def load_existing():
@@ -103,44 +103,82 @@ def load_existing():
         with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
             old = json.load(f)
 
-        for movie in old.get("movies", []):
-            if not isinstance(movie, dict):
-                continue
-            name = movie.get("movie")
-            if not name:
-                continue
+        # ---------- NEW COMPACT FORMAT ----------
+        if "m" in old and isinstance(old["m"], list):
+            for entry in old["m"]:
+                if not isinstance(entry, list) or len(entry) < 3:
+                    continue
+                name = entry[0]
+                languages = entry[1] if isinstance(entry[1], list) else []
+                dates = entry[2] if isinstance(entry[2], list) and len(entry[2]) >= 2 else None
+                if not name or not dates:
+                    continue
+                customstart = bool(entry[3]) if len(entry) > 3 else False
+                languages = set(str(x).strip() for x in languages if str(x).strip())
+                norm = normalize_movie(name)
 
-            languages = movie.get("languages", [])
-            if not isinstance(languages, list):
-                languages = []
-            languages = set(str(x).strip() for x in languages if str(x).strip())
-
-            dates = movie.get("dates", [])
-            if not isinstance(dates, list) or len(dates) < 2:
-                continue
-
-            customstart = movie.get("customstartdate", False)
-            norm = normalize_movie(name)
-
-            if norm not in movie_dict:
-                movie_dict[norm] = {
-                    "movie": name,
-                    "languages": languages,
-                    "start": dates[0],
-                    "end": dates[1],
-                    "customstart": customstart
-                }
-            else:
-                existing = movie_dict[norm]
-                existing["languages"].update(languages)
-                if existing["customstart"] or customstart:
-                    existing["customstart"] = True
-                    existing["start"] = max(existing["start"], dates[0])
+                if norm not in movie_dict:
+                    movie_dict[norm] = {
+                        "movie": name,
+                        "languages": languages,
+                        "start": dates[0],
+                        "end": dates[1],
+                        "customstart": customstart
+                    }
                 else:
-                    existing["start"] = min(existing["start"], dates[0])
-                existing["end"] = max(existing["end"], dates[1])
+                    existing = movie_dict[norm]
+                    existing["languages"].update(languages)
+                    if existing["customstart"] or customstart:
+                        existing["customstart"] = True
+                        existing["start"] = max(existing["start"], dates[0])
+                    else:
+                        existing["start"] = min(existing["start"], dates[0])
+                    existing["end"] = max(existing["end"], dates[1])
+            print(f"📂 Loaded {len(movie_dict)} existing movie entries (compact format)")
 
-        print(f"📂 Loaded {len(movie_dict)} existing movie entries")
+        # ---------- OLD VERBOSE FORMAT ----------
+        elif "movies" in old and isinstance(old["movies"], list):
+            for movie in old["movies"]:
+                if not isinstance(movie, dict):
+                    continue
+                name = movie.get("movie")
+                if not name:
+                    continue
+
+                languages = movie.get("languages", [])
+                if not isinstance(languages, list):
+                    languages = []
+                languages = set(str(x).strip() for x in languages if str(x).strip())
+
+                dates = movie.get("dates", [])
+                if not isinstance(dates, list) or len(dates) < 2:
+                    continue
+
+                customstart = movie.get("customstartdate", False)
+                norm = normalize_movie(name)
+
+                if norm not in movie_dict:
+                    movie_dict[norm] = {
+                        "movie": name,
+                        "languages": languages,
+                        "start": dates[0],
+                        "end": dates[1],
+                        "customstart": customstart
+                    }
+                else:
+                    existing = movie_dict[norm]
+                    existing["languages"].update(languages)
+                    if existing["customstart"] or customstart:
+                        existing["customstart"] = True
+                        existing["start"] = max(existing["start"], dates[0])
+                    else:
+                        existing["start"] = min(existing["start"], dates[0])
+                    existing["end"] = max(existing["end"], dates[1])
+            print(f"📂 Loaded {len(movie_dict)} existing movie entries (verbose format)")
+
+        else:
+            print("⚠️ Unknown movielist format, starting fresh")
+
     except Exception as e:
         print(f"⚠️ Could not load existing {OUTPUT_FILE}: {e}")
 
@@ -240,48 +278,48 @@ def build_movielist(start_date=DEFAULT_START_DATE):
         current += timedelta(days=1)
 
     # =================================================
-    # BUILD FINAL LIST
+    # BUILD COMPACT FINAL LIST
     # =================================================
-    movies = []
+    compact_movies = []
     for info in movie_dict.values():
-        item = {
-            "movie": info["movie"],
-            "languages": sorted(info["languages"]),
-            "dates": [info["start"], info["end"]]
-        }
+        entry = [
+            info["movie"],
+            sorted(info["languages"]),
+            [info["start"], info["end"]]
+        ]
         if info.get("customstart", False):
-            item["customstartdate"] = True
-        movies.append(item)
+            entry.append(True)          # mark custom start
+        compact_movies.append(entry)
 
     # =================================================
     # SORT (most recent first, then language count, then duration)
     # =================================================
-    def sort_key(item):
+    def sort_key(entry):
         try:
-            first = datetime.strptime(item["dates"][0], "%Y-%m-%d")
-            last = datetime.strptime(item["dates"][1], "%Y-%m-%d")
+            first = datetime.strptime(entry[2][0], "%Y-%m-%d")
+            last = datetime.strptime(entry[2][1], "%Y-%m-%d")
             return (
                 -first.year,
                 -first.month,
                 -first.day,
-                -len(item["languages"]),
+                -len(entry[1]),
                 -(last - first).days
             )
         except:
             return (0, 0, 0, 0, 0)
 
-    movies.sort(key=sort_key)
+    compact_movies.sort(key=sort_key)
 
     # =================================================
-    # SAVE OUTPUT
+    # SAVE OUTPUT (minified one-line)
     # =================================================
     final = {
-        "last_updated": datetime.now(IST).strftime("%Y-%m-%d %H:%M IST"),
-        "movies": movies
+        "lu": datetime.now(IST).strftime("%Y-%m-%d %H:%M IST"),
+        "m": compact_movies
     }
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(final, f, indent=2, ensure_ascii=False)
+        json.dump(final, f, ensure_ascii=False, separators=(",", ":"))
 
     # =================================================
     # SUMMARY
@@ -293,8 +331,8 @@ def build_movielist(start_date=DEFAULT_START_DATE):
     print(f"📁 Output          : {OUTPUT_FILE}")
     print(f"📂 Files found     : {files_found}")
     print(f"🎬 Raw movie keys  : {movie_entries_found}")
-    print(f"🎬 Final movies    : {len(movies)}")
-    print(f"🕒 Updated         : {final['last_updated']}")
+    print(f"🎬 Final movies    : {len(compact_movies)}")
+    print(f"🕒 Updated         : {final['lu']}")
     print("==========================================")
 
 # =====================================================
