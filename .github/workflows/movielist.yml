@@ -33,5 +33,5 @@ jobs:
         git config --local user.name "github-actions[bot]"
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git add movielist.json
-        git diff --cached --quiet || git commit -m "Auto-update movielist.json [skip ci]"
+        git diff --cached --quiet || git commit -m "Auto-update movielist.json"
         git push
