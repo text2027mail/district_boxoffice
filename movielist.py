@@ -13,7 +13,7 @@ BASE_URL = "https://districtdata2026.pages.dev/advance"
 OUTPUT_FILE = "movielist.json"
 DEFAULT_START_DATE = "2025-09-01"
 
-FUTURE_DAYS = 10
+FUTURE_DAYS = 30
 CONCURRENCY = 100
 REQUEST_TIMEOUT = 20
 
